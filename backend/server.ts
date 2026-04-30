@@ -627,9 +627,24 @@ app.get("/api/callstatus/insert", async (req: Request, res: Response) => {
     // Check for existing active call for this room
     const activeCallResult = await pool.request()
       .input('roomId', sql.NVarChar(50), roomId)
-      .query(`SELECT TOP 1 id, currentStatus FROM [CallStatus] WHERE roomId = @roomId AND currentStatus <> 0 ORDER BY dateTime DESC`);
+      .query(`SELECT TOP 1 id, currentStatus, dateTime, isMuted, dateTimeReset FROM [CallStatus] WHERE roomId = @roomId AND currentStatus <> 0 ORDER BY dateTime DESC`);
     if (activeCallResult.recordset.length > 0 && isActivate) {
-      // Already active, do nothing (do not create duplicates)
+      // Already active: do not create duplicates, but re-announce to dashboard
+      const existing = activeCallResult.recordset[0];
+      const roomInfo = await pool.request().input('id', sql.NVarChar(50), roomId).query(`SELECT roomName FROM [Room] WHERE id = @id`);
+      const roomName = roomInfo.recordset.length ? roomInfo.recordset[0].roomName : '';
+
+      io.to(`org_${orgId}`).emit("call:new", {
+        id: existing.id,
+        roomId,
+        roomName,
+        status: existing.currentStatus,
+        timestamp: existing.dateTime || new Date(),
+        muted: existing.isMuted === 1 || existing.isMuted === true,
+        dateTimeReset: existing.dateTimeReset,
+        minutesAgo: 0
+      });
+
       return res.status(200).json({ result: "SUCCESS", message: "Call already active, no change" });
     }
     if (activeCallResult.recordset.length > 0 && isReset) {
