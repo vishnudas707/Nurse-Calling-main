@@ -15,7 +15,8 @@ import { io, Socket } from "socket.io-client";
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState("");
     const [socket, setSocket] = useState<Socket | null>(null);
-    const [enabled, setEnabled] = useState(false);
+    const [enabled, setEnabled] = useState(true);
+    const [needsSoundInteraction, setNeedsSoundInteraction] = useState(false);
 
     // Track if speech is unlocked
     const [speechUnlocked, setSpeechUnlocked] = useState(false);
@@ -24,6 +25,21 @@ import { io, Socket } from "socket.io-client";
     useEffect(() => {
       speechUnlockedRef.current = speechUnlocked;
     }, [speechUnlocked]);
+
+    // Persist voice preference (default ON)
+    useEffect(() => {
+      try {
+        const stored = localStorage.getItem("voiceEnabled");
+        if (stored !== null) setEnabled(stored === "true");
+        else localStorage.setItem("voiceEnabled", "true");
+      } catch {}
+    }, []);
+
+    useEffect(() => {
+      try {
+        localStorage.setItem("voiceEnabled", enabled ? "true" : "false");
+      } catch {}
+    }, [enabled]);
     
     const toggleVoice = () => {
     if (!enabled) {
@@ -52,12 +68,14 @@ import { io, Socket } from "socket.io-client";
         voiceName = null
       } = {}
     ) {
+      if (!enabled) return;
       if (!window.speechSynthesis) {
         console.error("Speech synthesis not supported in this browser.");
         return;
       }
       if (!speechUnlockedRef.current) {
         console.warn("Speech synthesis is locked until user interacts with the page.");
+        setNeedsSoundInteraction(true);
         return;
       }
       const utterance = new SpeechSynthesisUtterance(text);
@@ -139,6 +157,7 @@ import { io, Socket } from "socket.io-client";
       // Handler to unlock speech synthesis on first user interaction
       const unlockSpeech = () => {
         setSpeechUnlocked(true);
+        setNeedsSoundInteraction(false);
         // Optionally, play a silent utterance to fully unlock
         try {
           const u = new window.SpeechSynthesisUtterance("");
@@ -258,6 +277,11 @@ import { io, Socket } from "socket.io-client";
 
       <div className="px-4 py-12 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-7xl">
+          {needsSoundInteraction && enabled && (
+            <div className="mb-4 rounded-lg border border-yellow-300 bg-yellow-50 px-4 py-3 text-sm text-yellow-900 dark:border-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-100">
+              Click anywhere (or press any key) once to enable sound announcements.
+            </div>
+          )}
           {/* Welcome Section 
           <div className="mb-8">
             {/*<h1 className="text-4xl font-bold text-gray-900 dark:text-white">
