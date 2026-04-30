@@ -16,10 +16,9 @@ import { io, Socket } from "socket.io-client";
     const [error, setError] = useState("");
     const [socket, setSocket] = useState<Socket | null>(null);
     const [enabled, setEnabled] = useState(true);
-    const [needsSoundInteraction, setNeedsSoundInteraction] = useState(false);
 
     // Track if speech is unlocked
-    const [speechUnlocked, setSpeechUnlocked] = useState(false);
+    const [speechUnlocked, setSpeechUnlocked] = useState(true);
     const speechUnlockedRef = useRef(false);
   
     useEffect(() => {
@@ -71,11 +70,6 @@ import { io, Socket } from "socket.io-client";
       if (!enabled) return;
       if (!window.speechSynthesis) {
         console.error("Speech synthesis not supported in this browser.");
-        return;
-      }
-      if (!speechUnlockedRef.current) {
-        console.warn("Speech synthesis is locked until user interacts with the page.");
-        setNeedsSoundInteraction(true);
         return;
       }
       const utterance = new SpeechSynthesisUtterance(text);
@@ -154,21 +148,6 @@ import { io, Socket } from "socket.io-client";
     const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5001";
   
     useEffect(() => {
-      // Handler to unlock speech synthesis on first user interaction
-      const unlockSpeech = () => {
-        setSpeechUnlocked(true);
-        setNeedsSoundInteraction(false);
-        // Optionally, play a silent utterance to fully unlock
-        try {
-          const u = new window.SpeechSynthesisUtterance("");
-          window.speechSynthesis.speak(u);
-        } catch {}
-        window.removeEventListener("click", unlockSpeech);
-        window.removeEventListener("keydown", unlockSpeech);
-      };
-      window.addEventListener("click", unlockSpeech);
-      window.addEventListener("keydown", unlockSpeech);
-  
       const fetchActiveCalls = async () => {
         setIsLoading(true);
         setError("");
@@ -267,8 +246,6 @@ import { io, Socket } from "socket.io-client";
   
       return () => {
         s.disconnect();
-        window.removeEventListener("click", unlockSpeech);
-        window.removeEventListener("keydown", unlockSpeech);
       };
     }, []);
   
@@ -278,11 +255,6 @@ import { io, Socket } from "socket.io-client";
 
       <div className="px-4 py-12 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-7xl">
-          {needsSoundInteraction && enabled && (
-            <div className="mb-4 rounded-lg border border-yellow-300 bg-yellow-50 px-4 py-3 text-sm text-yellow-900 dark:border-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-100">
-              Click anywhere (or press any key) once to enable sound announcements.
-            </div>
-          )}
           {/* Welcome Section 
           <div className="mb-8">
             {/*<h1 className="text-4xl font-bold text-gray-900 dark:text-white">
