@@ -378,7 +378,7 @@ app.get("/api/calls/active", async (req: Request, res: Response) => {
       `SELECT cs.[id], cs.[roomId], cs.[currentStatus], cs.[dateTime], cs.[isMuted], cs.[dateTimeReset], r.[roomName]
        FROM [CallStatus] cs
        LEFT JOIN [Room] r ON cs.[roomId] = r.[id]
-       WHERE cs.[currentStatus] = 1
+       WHERE cs.[currentStatus] <> 0
        ORDER BY cs.[dateTime] DESC`
     );
     const now = Date.now();
@@ -407,12 +407,61 @@ app.post("/api/calls", async (req: Request, res: Response) => {
   if (!roomId || !organisationId) {
     return res.status(400).json({ error: "Room ID and organisationId are required" });
   }
-  // ...existing DB insert logic here (not shown for brevity)...
-  // After successful DB insert, fetch the new call (simulate as newCall)
-  const newCall = { id: `C${Date.now()}`, roomId, status: "active", timestamp: new Date(), minutesAgo: 0, muted: false, organisationId };
-  // Broadcast to org room
-  io.to(`org_${organisationId}`).emit("call:new", newCall);
-  res.status(201).json({ success: true, data: newCall });
+  try {
+    const pool = await getPool();
+
+    // Reject if there's already an active (non-reset) call for this room
+    const activeCallResult = await pool.request()
+      .input('roomId', sql.NVarChar(50), roomId)
+      .query(`SELECT TOP 1 id, currentStatus, dateTime FROM [CallStatus] WHERE roomId = @roomId AND currentStatus <> 0 ORDER BY dateTime DESC`);
+
+    if (activeCallResult.recordset.length > 0) {
+      const existing = activeCallResult.recordset[0];
+      return res.status(409).json({
+        success: false,
+        error: "Call already active for this room",
+        existingCallId: existing.id
+      });
+    }
+
+    const callId = `CALL_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+    const now = new Date();
+    const insertReq = pool.request();
+    insertReq.input("id", sql.NVarChar(50), callId);
+    insertReq.input("roomId", sql.NVarChar(50), roomId);
+    insertReq.input("currentStatus", sql.Int, 1); // 1 - Active
+    insertReq.input("dateTime", sql.DateTime, now);
+    insertReq.input("isMuted", sql.Int, 0);
+    insertReq.input("mutedDateTime", sql.DateTime, null);
+    insertReq.input("dateTimeReset", sql.DateTime, null);
+    await insertReq.query(
+      `INSERT INTO [CallStatus] (id, roomId, currentStatus, dateTime, isMuted, mutedDateTime, dateTimeReset)
+       VALUES (@id, @roomId, @currentStatus, @dateTime, @isMuted, @mutedDateTime, @dateTimeReset)`
+    );
+
+    const roomInfo = await pool.request()
+      .input('id', sql.NVarChar(50), roomId)
+      .query(`SELECT roomName FROM [Room] WHERE id = @id`);
+    const roomName = roomInfo.recordset.length ? roomInfo.recordset[0].roomName : '';
+
+    const newCall = {
+      id: callId,
+      roomId,
+      roomName,
+      status: 1,
+      timestamp: now,
+      minutesAgo: 0,
+      muted: false,
+      dateTimeReset: null,
+      organisationId
+    };
+
+    io.to(`org_${organisationId}`).emit("call:new", newCall);
+    return res.status(201).json({ success: true, data: newCall });
+  } catch (err) {
+    console.error('[CALLS POST] Error:', err);
+    return res.status(500).json({ success: false, error: 'Failed to create call' });
+  }
 });
 
 // Update call status or mute in DB
@@ -562,6 +611,10 @@ app.get("/api/callstatus/insert", async (req: Request, res: Response) => {
   }
   try {
     const pool = await getPool();
+    const statusNumber = Number(status);
+    const isReset = statusNumber === 0;
+    const isActivate = !Number.isNaN(statusNumber) && statusNumber !== 0;
+
     // Lookup roomId from Room table using roomNo_deviceNumber and floor
     const roomResult = await pool.request()
       .input('roomNo_deviceNo', sql.NVarChar(100), dnum)
@@ -574,13 +627,13 @@ app.get("/api/callstatus/insert", async (req: Request, res: Response) => {
     // Check for existing active call for this room
     const activeCallResult = await pool.request()
       .input('roomId', sql.NVarChar(50), roomId)
-      .query(`SELECT id, currentStatus FROM [CallStatus] WHERE roomId = @roomId AND currentStatus = 1`);
-    if (activeCallResult.recordset.length > 0 && status === '1') {
-      // Already active, do nothing
+      .query(`SELECT TOP 1 id, currentStatus FROM [CallStatus] WHERE roomId = @roomId AND currentStatus <> 0 ORDER BY dateTime DESC`);
+    if (activeCallResult.recordset.length > 0 && isActivate) {
+      // Already active, do nothing (do not create duplicates)
       return res.status(200).json({ result: "SUCCESS", message: "Call already active, no change" });
     }
-    if (activeCallResult.recordset.length > 0 && status === '0') {
-      // Update status to 0 (reset)
+    if (activeCallResult.recordset.length > 0 && isReset) {
+      // Update status to 0 (reset the existing active call)
       const callId = activeCallResult.recordset[0].id;
       await pool.request()
         .input('id', sql.NVarChar(50), callId)
@@ -591,18 +644,21 @@ app.get("/api/callstatus/insert", async (req: Request, res: Response) => {
       io.to(`org_${orgId}`).emit("call:status", { id: callId, status: 0 });
       return res.status(200).json({ result: "SUCCESS", message: "Call status reset" });
     }
+    if (!isActivate && !isReset) {
+      return res.status(400).json({ result: "FAILURE", error: "Invalid status" });
+    }
     // No active call, insert new
     const callId = `CALL_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
     const insertReq = pool.request();
     insertReq.input("id", sql.NVarChar(50), callId);
     insertReq.input("roomId", sql.NVarChar(50), roomId);
-    insertReq.input("currentStatus", sql.Int, Number(status)); // 1-Active, 0 -reset
+    insertReq.input("currentStatus", sql.Int, statusNumber); // non-zero is active, 0 is reset
     const now = new Date();
     insertReq.input("dateTime", sql.DateTime, now);
     insertReq.input("isMuted", sql.Int, 0);
     insertReq.input("mutedDateTime", sql.DateTime, 0 ? now : null);
-    if (status === '1') {insertReq.input("dateTimeReset", sql.DateTime, null);}
-    else {insertReq.input("dateTimeReset", sql.DateTime, now);}
+    if (isActivate) { insertReq.input("dateTimeReset", sql.DateTime, null); }
+    else { insertReq.input("dateTimeReset", sql.DateTime, now); }
     const insertQuery = `INSERT INTO [CallStatus] (id, roomId, currentStatus, dateTime, isMuted, mutedDateTime, dateTimeReset) VALUES (@id, @roomId, @currentStatus, @dateTime, @isMuted, @mutedDateTime, @dateTimeReset)`;
     await insertReq.query(insertQuery);
     // Fetch roomName for the card
@@ -613,10 +669,10 @@ app.get("/api/callstatus/insert", async (req: Request, res: Response) => {
       id: callId,
       roomId,
       roomName,
-      status: Number(status),
+      status: statusNumber,
       timestamp: now,
       muted: false,
-      dateTimeReset: status === '1' ? null : now,
+      dateTimeReset: isActivate ? null : now,
       minutesAgo: 0
     });
     return res.status(200).json({ result: "SUCCESS", message: "New call inserted" });
