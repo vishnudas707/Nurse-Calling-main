@@ -21,11 +21,13 @@ export default function DeviceEmulatorPage() {
     try {
       const resp = await fetch(url, { method: "GET" });
       const data = await resp.json().catch(() => ({}));
-      setResult(
-        resp.ok
-          ? `Success: ${JSON.stringify(data)}`
-          : `Error: ${resp.status} ${resp.statusText}`
-      );
+      if (resp.ok && data && data.result === "SUCCESS") {
+        setResult(`Success: ${typeof data.message === "string" ? data.message : JSON.stringify(data)}`);
+      } else if (resp.ok) {
+        setResult(`Success: ${JSON.stringify(data)}`);
+      } else {
+        setResult(`Error: ${resp.status} ${resp.statusText}${data && (data as { error?: string }).error ? ` — ${(data as { error: string }).error}` : ""}`);
+      }
     } catch (err: any) {
       setResult("Error: " + err.message);
     } finally {

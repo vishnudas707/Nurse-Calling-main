@@ -645,7 +645,10 @@ app.get("/api/callstatus/insert", async (req: Request, res: Response) => {
         minutesAgo: 0
       });
 
-      return res.status(200).json({ result: "SUCCESS", message: "Call already active, no change" });
+      return res.status(200).json({
+        result: "SUCCESS",
+        message: "Repeated call — announcement broadcast to dashboard (call record unchanged)",
+      });
     }
     if (activeCallResult.recordset.length > 0 && isReset) {
       // Update status to 0 (reset the existing active call)

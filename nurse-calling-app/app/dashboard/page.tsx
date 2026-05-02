@@ -168,7 +168,7 @@ import { io, Socket } from "socket.io-client";
             // If call already exists, do nothing; else, add new card
             const exists = prev.find((c) => c.id === call.id);
             if (exists) {
-              speakText(`Announcement: Call from ${call.roomName}. Please attend.`);
+              speakText(`Announcement: Repeated call from ${call.roomName}. Please attend.`);
               return prev;
             }
             console.log('calling speakText for new call'+call.roomName);
