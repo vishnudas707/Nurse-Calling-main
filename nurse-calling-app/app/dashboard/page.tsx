@@ -4,9 +4,8 @@
 
 import TopNavBar from "../components/navbar";
 import { Card } from "flowbite-react";
-import { it } from "node:test";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState } from "react";
 import { io, Socket } from "socket.io-client";
 
   function DashboardPage() {
@@ -15,48 +14,7 @@ import { io, Socket } from "socket.io-client";
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState("");
     const [socket, setSocket] = useState<Socket | null>(null);
-    const [enabled, setEnabled] = useState(true);
 
-    // Track if speech is unlocked
-    const [speechUnlocked, setSpeechUnlocked] = useState(true);
-    const speechUnlockedRef = useRef(false);
-  
-    useEffect(() => {
-      speechUnlockedRef.current = speechUnlocked;
-    }, [speechUnlocked]);
-
-    // Persist voice preference (default ON)
-    useEffect(() => {
-      try {
-        const stored = localStorage.getItem("voiceEnabled");
-        if (stored !== null) setEnabled(stored === "true");
-        else localStorage.setItem("voiceEnabled", "true");
-      } catch {}
-    }, []);
-
-    useEffect(() => {
-      try {
-        localStorage.setItem("voiceEnabled", enabled ? "true" : "false");
-      } catch {}
-    }, [enabled]);
-    
-    const toggleVoice = () => {
-    if (!enabled) {
-      // enable + unlock
-      try {
-        window.speechSynthesis.cancel();
-        window.speechSynthesis.speak(
-          new SpeechSynthesisUtterance("")
-        );
-      } catch {}
-    } else {
-      // disable → stop any ongoing speech
-      window.speechSynthesis.cancel();
-    }
-
-    setEnabled(!enabled);
-  };
-    // SpeakText function outside useEffect, always uses latest ref
     function speakText(
       text: string,
       {
@@ -67,7 +25,6 @@ import { io, Socket } from "socket.io-client";
         voiceName = null
       } = {}
     ) {
-      if (!enabled) return;
       if (!window.speechSynthesis) {
         console.error("Speech synthesis not supported in this browser.");
         return;
@@ -460,20 +417,6 @@ import { io, Socket } from "socket.io-client";
                 </div>
               </Card>
             </div>
-            <button
-              onClick={toggleVoice}
-              style={{
-                padding: "10px 16px",
-                borderRadius: "8px",
-                border: "none",
-                cursor: "pointer",
-                backgroundColor: enabled ? "#22c55e" : "#ef4444",
-                color: "white",
-                fontWeight: "bold",
-              }}
-            >
-              {enabled ? "🔊 Voice ON" : "🔇 Voice OFF"}
-            </button>
           </div>
         </div>
       </div>
