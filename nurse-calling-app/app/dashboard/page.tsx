@@ -139,6 +139,11 @@ import { io, Socket } from "socket.io-client";
       };
       fetchRecentHistory();
   
+      const refreshIntervalId = window.setInterval(() => {
+        fetchActiveCalls();
+        fetchRecentHistory();
+      }, 5 * 60 * 1000);
+  
       // Setup socket.io client
       const s = io(API_BASE, { transports: ["websocket"] });
       setSocket(s);
@@ -202,6 +207,7 @@ import { io, Socket } from "socket.io-client";
       });
   
       return () => {
+        window.clearInterval(refreshIntervalId);
         s.disconnect();
       };
     }, []);
