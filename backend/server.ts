@@ -21,6 +21,19 @@ const io = new SocketIOServer(server, {
 });
 const PORT = process.env.PORT || 5001;
 
+// Repeated call logging (minimal, additive)
+// IMPORTANT: This service user may not have DDL permissions in production.
+// So we only *use* CallRepeat table if it already exists.
+async function hasCallRepeatTable(pool: any): Promise<boolean> {
+  try {
+    const r = await pool.request().query(`SELECT OBJECT_ID(N'[dbo].[CallRepeat]', N'U') AS objId`);
+    return !!r?.recordset?.[0]?.objId;
+  } catch (err) {
+    console.error('[CallRepeat] Table existence check failed:', err);
+    return false;
+  }
+}
+
 // Middleware
 app.use(cors());
 app.use(express.json());
@@ -530,10 +543,24 @@ app.get("/api/calls/history", async (req: Request, res: Response) => {
   try {
     const { startDate, endDate, search, status, room, muted, page = 1, pageSize = 10 } = req.query;
     const pool = await getPool();
+    const repeatEnabled = await hasCallRepeatTable(pool);
     let query =
-      `SELECT cs.[id], cs.[roomId], cs.[currentStatus], cs.[dateTime], cs.[isMuted], cs.[mutedDateTime], cs.[dateTimeReset], r.[roomName], r.[departmentType], r.[roomType], r.[floor] 
+      `SELECT cs.[id], cs.[roomId], cs.[currentStatus], cs.[dateTime], cs.[isMuted], cs.[mutedDateTime], cs.[dateTimeReset], r.[roomName], r.[departmentType], r.[roomType], r.[floor]${
+        repeatEnabled
+          ? `, ISNULL(cr.[repeatCount], 0) AS [repeatCount], cr.[lastRepeatAt] AS [lastRepeatAt]`
+          : `, 0 AS [repeatCount], NULL AS [lastRepeatAt]`
+      }
        FROM [CallStatus] cs
-       LEFT JOIN [Room] r ON cs.[roomId] = r.[id]`;
+       LEFT JOIN [Room] r ON cs.[roomId] = r.[id]
+       ${
+         repeatEnabled
+           ? `LEFT JOIN (
+                SELECT callId, COUNT(*) AS repeatCount, MAX(repeatAt) AS lastRepeatAt
+                FROM [CallRepeat]
+                GROUP BY callId
+              ) cr ON cr.callId = cs.[id]`
+           : ``
+       }`;
     const where: string[] = [];
     const params: any[] = [];
     if (startDate) {
@@ -589,6 +616,14 @@ app.get("/api/calls/history", async (req: Request, res: Response) => {
       departmentType: row.departmentType,
       roomType: row.roomType,
       floor: row.floor,
+      repeatCount: row.repeatCount || 0,
+      lastRepeatAt: row.lastRepeatAt,
+      // Repeat duration is measured from after the call start time (dateTime) to the latest repeatAt.
+      // If there is no repeat, this will be null.
+      repeatDurationMinutes:
+        row.lastRepeatAt && row.dateTime
+          ? Math.max(0, Math.floor((new Date(row.lastRepeatAt).getTime() - new Date(row.dateTime).getTime()) / 60000))
+          : null,
     }));
     res.status(200).json({
       success: true,
@@ -611,6 +646,7 @@ app.get("/api/callstatus/insert", async (req: Request, res: Response) => {
   }
   try {
     const pool = await getPool();
+    const repeatEnabled = await hasCallRepeatTable(pool);
     const statusNumber = Number(status);
     const isReset = statusNumber === 0;
     const isActivate = !Number.isNaN(statusNumber) && statusNumber !== 0;
@@ -631,6 +667,21 @@ app.get("/api/callstatus/insert", async (req: Request, res: Response) => {
     if (activeCallResult.recordset.length > 0 && isActivate) {
       // Already active: do not create duplicates, but re-announce to dashboard
       const existing = activeCallResult.recordset[0];
+
+      // Log the repeated call timestamp for reporting
+      if (repeatEnabled) {
+        try {
+          await pool.request()
+            .input('callId', sql.NVarChar(50), existing.id)
+            .input('roomId', sql.NVarChar(50), roomId)
+            .input('organisationId', sql.NVarChar(50), String(orgId))
+            .input('repeatAt', sql.DateTime, new Date())
+            .query(`INSERT INTO [CallRepeat] (callId, roomId, organisationId, repeatAt) VALUES (@callId, @roomId, @organisationId, @repeatAt)`);
+        } catch (repeatErr) {
+          console.error('[CALLSTATUS INSERT] Failed to log repeat:', repeatErr);
+        }
+      }
+
       const roomInfo = await pool.request().input('id', sql.NVarChar(50), roomId).query(`SELECT roomName FROM [Room] WHERE id = @id`);
       const roomName = roomInfo.recordset.length ? roomInfo.recordset[0].roomName : '';
 
