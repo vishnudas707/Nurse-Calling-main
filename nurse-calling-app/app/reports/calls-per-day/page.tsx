@@ -5,6 +5,7 @@ import { Card, Spinner } from "flowbite-react";
 import { useState } from "react";
 import ReportFilters from "../components/ReportFilters";
 import { useReportCalls } from "../hooks/useReportCalls";
+import { exportCallsPerDayPdf } from "../lib/export-report-pdf";
 import { computeCallsPerDay } from "../lib/report-utils";
 
 export default function CallsPerDayPage() {
@@ -48,9 +49,19 @@ export default function CallsPerDayPage() {
             rooms={rooms}
           />
           <Card className="dark:bg-gray-800">
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
               <div className="text-lg font-semibold text-gray-900 dark:text-gray-100">Daily call counts</div>
-              <div className="text-sm text-gray-500 dark:text-gray-300">{allCalls.length} total calls</div>
+              <div className="flex items-center gap-3">
+                <div className="text-sm text-gray-500 dark:text-gray-300">{allCalls.length} total calls</div>
+                <button
+                  type="button"
+                  onClick={() => exportCallsPerDayPdf(callsPerDay)}
+                  disabled={isLoading || !!error || callsPerDay.length === 0}
+                  className="px-3 py-1 bg-blue-600 text-white rounded min-w-[120px] disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Download PDF
+                </button>
+              </div>
             </div>
             {isLoading ? (
               <div className="flex justify-center items-center h-64">
