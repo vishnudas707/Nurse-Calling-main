@@ -640,9 +640,13 @@ app.get("/api/calls/history", async (req: Request, res: Response) => {
 });
 // Insert record into CallStatus via GET (for device integration)
 app.get("/api/callstatus/insert", async (req: Request, res: Response) => {
-  const { orgId, dnum, status, floor } = req.query;
-  if (!orgId || !dnum || status === undefined || !floor) {
-    return res.status(400).json({ result: "FAILURE", error: "Missing orgId, dnum, status, or floor" });
+  const { orgId, hid, dnum, status, floor } = req.query;
+  if (!orgId || !hid || !dnum || status === undefined || floor === undefined || floor === "") {
+    return res.status(400).json({ result: "FAILURE", error: "Missing orgId, hid, dnum, status, or floor" });
+  }
+  const hidStr = String(hid);
+  if (!/^\d{10}$/.test(hidStr)) {
+    return res.status(400).json({ result: "FAILURE", error: "hid must be a 10-digit number" });
   }
   try {
     const pool = await getPool();

@@ -2,10 +2,13 @@
 
 import { useState } from "react";
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://20.163.9.187:5001";
+
 export default function DeviceEmulatorPage() {
-  const [orgId, setOrgId] = useState("");
-  const [floor, setFloor] = useState("");
-  const [roomNo, setRoomNo] = useState("");
+  const [orgId, setOrgId] = useState("ORG001");
+  const [floor, setFloor] = useState("0");
+  const [roomNo, setRoomNo] = useState("101");
+  const [hid, setHid] = useState("0123456789");
   const [status, setStatus] = useState(-1); // -1 for call, 0 for reset
   const [result, setResult] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -13,11 +16,11 @@ export default function DeviceEmulatorPage() {
   const handleSend = async (newStatus: number) => {
     setLoading(true);
     setResult(null);
-    const url = `http://localhost:5001/api/callstatus/insert?orgId=${encodeURIComponent(
+    const url = `${API_BASE}/api/callstatus/insert?orgId=${encodeURIComponent(
       orgId
-    )}&dnum=${encodeURIComponent(roomNo)}&status=${newStatus}&floor=${encodeURIComponent(
+    )}&hid=${encodeURIComponent(hid)}&dnum=${encodeURIComponent(roomNo)}&floor=${encodeURIComponent(
       floor
-    )}`;
+    )}&status=${newStatus}`;
     try {
       const resp = await fetch(url, { method: "GET" });
       const data = await resp.json().catch(() => ({}));
@@ -67,6 +70,17 @@ export default function DeviceEmulatorPage() {
               value={roomNo}
               onChange={e => setRoomNo(e.target.value)}
               placeholder="3456"
+            />
+          </div>
+          <div>
+            <label className="block text-gray-700 dark:text-gray-200 mb-1">HID (10 digits)</label>
+            <input
+              className="w-full px-3 py-2 border rounded focus:outline-none focus:ring"
+              value={hid}
+              onChange={e => setHid(e.target.value)}
+              placeholder="0123456789"
+              inputMode="numeric"
+              maxLength={10}
             />
           </div>
         </div>
