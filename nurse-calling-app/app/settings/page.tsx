@@ -6,6 +6,7 @@ import TopNavBar from "../components/navbar";
 import { Card } from "flowbite-react";
 import { useState, useEffect } from "react";
 import { ROOM_TYPE_MAP, DEPARTMENT_TYPE_MAP, getRoomTypeOptions, getDepartmentTypeOptions } from "../lib/constants";
+import { getOrganisationId } from "../lib/auth";
 
 interface User {
   id: string;
@@ -71,7 +72,9 @@ export default function SettingsPage() {
     try {
       setIsLoading(true);
       setError("");
-      const resp = await fetch(`${API_BASE}/api/rooms`);
+      const orgId = getOrganisationId();
+      const orgQuery = orgId ? `?organisationId=${encodeURIComponent(orgId)}` : "";
+      const resp = await fetch(`${API_BASE}/api/rooms${orgQuery}`);
       const data = await resp.json();
       if (resp.ok && data.success) {
         setRooms(data.data);

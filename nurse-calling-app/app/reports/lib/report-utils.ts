@@ -1,4 +1,20 @@
+import { getOrganisationId } from "../../lib/auth";
+
 export const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5001";
+
+function organisationQueryPrefix() {
+  const orgId = getOrganisationId();
+  return orgId ? `?organisationId=${encodeURIComponent(orgId)}` : "";
+}
+
+export function roomsApiUrl() {
+  return `${API_BASE}/api/rooms${organisationQueryPrefix()}`;
+}
+
+export function callsHistoryUrl(query: string) {
+  const prefix = organisationQueryPrefix();
+  return `${API_BASE}/api/calls/history${prefix ? prefix + "&" : "?"}${query}`;
+}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type CallRecord = any;

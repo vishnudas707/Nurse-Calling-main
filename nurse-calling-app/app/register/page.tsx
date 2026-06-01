@@ -2,20 +2,26 @@
 
 import { DarkThemeToggle } from "flowbite-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { saveUserSession } from "../lib/auth";
 
 export default function RegisterPage() {
+  const router = useRouter();
   const [formData, setFormData] = useState({
     firstName: "",
     lastName: "",
     email: "",
+    organisationId: "",
     password: "",
     confirmPassword: "",
   });
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
+  ) => {
     const { name, value } = e.target;
     setFormData((prev) => ({
       ...prev,
@@ -27,7 +33,6 @@ export default function RegisterPage() {
     e.preventDefault();
     setError("");
 
-    // Validation
     if (formData.password !== formData.confirmPassword) {
       setError("Passwords do not match");
       return;
@@ -38,22 +43,72 @@ export default function RegisterPage() {
       return;
     }
 
+    const organisationId = formData.organisationId.trim();
+    if (!organisationId) {
+      setError("Organisation ID is required");
+      return;
+    }
+
+    if (!formData.email.includes("@")) {
+      setError("Please enter a valid email address");
+      return;
+    }
+
     setIsLoading(true);
 
     try {
-      // TODO: Implement actual registration logic
-      console.log("Registration attempt:", {
-        firstName: formData.firstName,
-        lastName: formData.lastName,
-        email: formData.email,
+      const apiBase =
+        (process.env.NEXT_PUBLIC_API_URL as string) || "http://localhost:5001";
+      const name = `${formData.firstName.trim()} ${formData.lastName.trim()}`.trim();
+      const id = `USER_${Date.now()}`;
+
+      const resp = await fetch(`${apiBase}/api/auth/register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id,
+          organisationId,
+          name,
+          email: formData.email.trim(),
+          password: formData.password,
+          role: "user",
+        }),
       });
 
-      // Simulated delay
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      const data = await resp.json().catch(() => ({}));
 
-      // Placeholder: redirect to login or dashboard
-      // router.push("/login");
+      if (!resp.ok) {
+        if (resp.status === 409) {
+          setError(data.error || "An account with this email already exists");
+        } else if (resp.status === 400) {
+          setError(data.error || "Please check all required fields");
+        } else {
+          setError(data.error || "Registration failed. Please try again.");
+        }
+        return;
+      }
+
+      const token = data.token;
+      const registered = data.data;
+      if (token && registered) {
+        const user = {
+          id: registered.id,
+          name: registered.name,
+          email: registered.email,
+          role: registered.role,
+          organisationId: registered.organisationId,
+        };
+        try {
+          sessionStorage.setItem("auth_token", token);
+          saveUserSession(user, sessionStorage);
+        } catch (storageErr) {
+          console.warn("Failed to save registration session", storageErr);
+        }
+      }
+
+      router.push("/dashboard");
     } catch (err) {
+      console.error(err);
       setError("Registration failed. Please try again.");
     } finally {
       setIsLoading(false);
@@ -73,7 +128,7 @@ export default function RegisterPage() {
               Create Account
             </h1>
             <p className="mb-6 text-center text-gray-600 dark:text-gray-400">
-              Join us today
+              Sign up for your organisation&apos;s nurse dashboard
             </p>
 
             {error && (
@@ -121,6 +176,29 @@ export default function RegisterPage() {
                     required
                   />
                 </div>
+              </div>
+
+              <div>
+                <label
+                  htmlFor="organisationId"
+                  className="mb-2 block text-sm font-medium text-gray-900 dark:text-white"
+                >
+                  Organisation ID
+                </label>
+                <input
+                  id="organisationId"
+                  type="text"
+                  name="organisationId"
+                  value={formData.organisationId}
+                  onChange={handleChange}
+                  className="block w-full rounded-lg border border-gray-300 bg-gray-50 p-2.5 text-gray-900 focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:placeholder-gray-400 dark:focus:border-blue-500 dark:focus:ring-blue-500"
+                  placeholder="e.g. ORG001"
+                  required
+                />
+                <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">
+                  Use the ID provided by your hospital. Users with the same ID
+                  share one dashboard.
+                </p>
               </div>
 
               <div>

@@ -207,8 +207,16 @@ const ROOM_TABLE = 'Room';
 // GET all rooms
 app.get("/api/rooms", async (req: Request, res: Response) => {
   try {
+    const { organisationId } = req.query;
     const pool = await getPool();
-    const result = await pool.request().query(`SELECT * FROM [${ROOM_TABLE}] WHERE active = 1 ORDER BY id`);
+    const request = pool.request();
+    let query = `SELECT * FROM [${ROOM_TABLE}] WHERE active = 1`;
+    if (organisationId) {
+      request.input('organisationId', sql.NVarChar(50), String(organisationId));
+      query += ` AND organisationId = @organisationId`;
+    }
+    query += ` ORDER BY id`;
+    const result = await request.query(query);
     
     // Map room type and department type to readable names
     const mappedRooms = result.recordset.map((room: any) => ({
@@ -384,16 +392,21 @@ app.delete("/api/rooms/:id", async (req: Request, res: Response) => {
 // Fetch active calls from DB (CallStatus table)
 app.get("/api/calls/active", async (req: Request, res: Response) => {
   try {
-    console.log('[CALLS ACTIVE] Fetching active calls from DB with room name join');
+    const { organisationId } = req.query;
+    console.log('[CALLS ACTIVE] Fetching active calls from DB with room name join', { organisationId });
     const pool = await getPool();
-    // Join CallStatus with Rooms to get roomName
-    const result = await pool.request().query(
+    const request = pool.request();
+    let query =
       `SELECT cs.[id], cs.[roomId], cs.[currentStatus], cs.[dateTime], cs.[isMuted], cs.[dateTimeReset], r.[roomName]
        FROM [CallStatus] cs
        LEFT JOIN [Room] r ON cs.[roomId] = r.[id]
-       WHERE cs.[currentStatus] <> 0
-       ORDER BY cs.[dateTime] DESC`
-    );
+       WHERE cs.[currentStatus] <> 0`;
+    if (organisationId) {
+      request.input('organisationId', sql.NVarChar(50), String(organisationId));
+      query += ` AND r.[organisationId] = @organisationId`;
+    }
+    query += ` ORDER BY cs.[dateTime] DESC`;
+    const result = await request.query(query);
     const now = Date.now();
     const calls = result.recordset.map((row: any) => ({
       id: row.id,
@@ -541,7 +554,7 @@ app.put("/api/calls/:id", async (req: Request, res: Response) => {
 // Get all call history for report
 app.get("/api/calls/history", async (req: Request, res: Response) => {
   try {
-    const { startDate, endDate, search, status, room, muted, page = 1, pageSize = 10 } = req.query;
+    const { startDate, endDate, search, status, room, muted, organisationId, page = 1, pageSize = 10 } = req.query;
     const pool = await getPool();
     const repeatEnabled = await hasCallRepeatTable(pool);
     let query =
@@ -586,6 +599,10 @@ app.get("/api/calls/history", async (req: Request, res: Response) => {
     if (muted) {
       where.push('cs.[isMuted] = @muted');
       params.push({ name: 'muted', type: sql.Bit, value: muted === 'true' ? 1 : 0 });
+    }
+    if (organisationId) {
+      where.push('r.[organisationId] = @organisationId');
+      params.push({ name: 'organisationId', type: sql.NVarChar(50), value: String(organisationId) });
     }
     if (where.length > 0) {
       query += ' WHERE ' + where.join(' AND ');

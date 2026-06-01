@@ -4,6 +4,7 @@
 
 import TopNavBar from "../components/navbar";
 import { Card } from "flowbite-react";
+import { getOrganisationId } from "../lib/auth";
 
 import { useEffect, useState } from "react";
 import { io, Socket } from "socket.io-client";
@@ -14,6 +15,7 @@ import { io, Socket } from "socket.io-client";
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState("");
     const [socket, setSocket] = useState<Socket | null>(null);
+    const [organisationId, setOrganisationId] = useState<string | null>(null);
 
     function speakText(
       text: string,
@@ -105,11 +107,15 @@ import { io, Socket } from "socket.io-client";
     const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5001";
   
     useEffect(() => {
+      const orgId = getOrganisationId();
+      setOrganisationId(orgId);
+      const orgQuery = orgId ? `?organisationId=${encodeURIComponent(orgId)}` : "";
+
       const fetchActiveCalls = async () => {
         setIsLoading(true);
         setError("");
         try {
-          const resp = await fetch(`${API_BASE}/api/calls/active`);
+          const resp = await fetch(`${API_BASE}/api/calls/active${orgQuery}`);
           const data = await resp.json();
           if (resp.ok && data.success) {
             setActiveCalls(data.data || []);
@@ -127,7 +133,9 @@ import { io, Socket } from "socket.io-client";
       // Fetch recent history (last 5 calls)
       const fetchRecentHistory = async () => {
         try {
-          const resp = await fetch(`${API_BASE}/api/calls/history?limit=5`);
+          const resp = await fetch(
+            `${API_BASE}/api/calls/history${orgQuery ? orgQuery + "&" : "?"}page=1&pageSize=5`
+          );
           const data = await resp.json();
           if (resp.ok && data.success) {
             setRecentHistory(data.data.slice(0, 5));
@@ -148,20 +156,8 @@ import { io, Socket } from "socket.io-client";
       const s = io(API_BASE, { transports: ["websocket"] });
       setSocket(s);
   
-      // Get orgId from user (localStorage/sessionStorage)
-      let orgId = 'org_ORG_001'; // Default/fallback
-      try {
-        const userStr = localStorage.getItem("user") || sessionStorage.getItem("user");
-        if (userStr) {
-          const user = JSON.parse(userStr);
-          console.log('[SocketIO] Retrieved user from storage', user);
-          orgId = user.organisationId;
-          // Save orgId in sessionStorage for later use
-          sessionStorage.setItem('organisationId', orgId);
-        }
-      } catch {}
-      console.log('[SocketIO] Joining org room', orgId);
       if (orgId) {
+        sessionStorage.setItem("organisationId", orgId);
         s.emit("joinOrg", orgId);
       }
   
@@ -231,9 +227,16 @@ import { io, Socket } from "socket.io-client";
 
           {/* Active Calls Section - Moved to Top */}
           <div className="mb-12">
-            <h2 className="mb-6 text-2xl font-bold text-gray-900 dark:text-white">
-              Active Calls
-            </h2>
+            <div className="mb-6">
+              <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
+                Active Calls
+              </h2>
+              {organisationId && (
+                <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+                  Organisation: <span className="font-medium">{organisationId}</span>
+                </p>
+              )}
+            </div>
 
             {/* Active Calls Grid - 6 per row */}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-6">
@@ -266,8 +269,8 @@ import { io, Socket } from "socket.io-client";
                           className={`mt-1 rounded px-2 py-1 text-xs font-medium border ${call.muted ? 'bg-gray-200 text-gray-700 border-gray-400 dark:bg-gray-700 dark:text-gray-200' : 'bg-green-100 text-green-800 border-green-400 dark:bg-green-900 dark:text-green-200'}`}
                           onClick={async () => {
                             try {
-                              // Retrieve organisationId from sessionStorage
-                              const organisationId = sessionStorage.getItem('organisationId') || 'org_ORG_001';
+                              const organisationId = getOrganisationId();
+                              if (!organisationId) return;
                               const payload = { muted: !call.muted, organisationId };
                               console.log('[MuteButton] Sending PUT', `${API_BASE}/api/calls/${call.id}`, payload);
                               const resp = await fetch(`${API_BASE}/api/calls/${call.id}`, {

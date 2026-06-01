@@ -4,6 +4,7 @@ import { DarkThemeToggle } from "flowbite-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { saveUserSession } from "../lib/auth";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -57,10 +58,10 @@ export default function LoginPage() {
         try {
           if (rememberMe) {
             localStorage.setItem("auth_token", token);
-            if (user) localStorage.setItem("user", JSON.stringify(user));
+            if (user) saveUserSession(user, localStorage);
           } else {
             sessionStorage.setItem("auth_token", token);
-            if (user) sessionStorage.setItem("user", JSON.stringify(user));
+            if (user) saveUserSession(user, sessionStorage);
           }
         } catch (storageErr) {
           console.warn("Failed to save token/user to storage", storageErr);

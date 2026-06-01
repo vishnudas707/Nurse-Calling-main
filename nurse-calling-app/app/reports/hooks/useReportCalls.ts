@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { API_BASE, buildHistoryQueryParams, type CallRecord, type ReportFilterParams } from "../lib/report-utils";
+import { buildHistoryQueryParams, callsHistoryUrl, roomsApiUrl, type CallRecord, type ReportFilterParams } from "../lib/report-utils";
 
 export function useReportCalls(filters: ReportFilterParams) {
   const [allCalls, setAllCalls] = useState<CallRecord[]>([]);
@@ -17,10 +17,9 @@ export function useReportCalls(filters: ReportFilterParams) {
       setError("");
       try {
         const query = buildHistoryQueryParams(filters);
-        const callsUrl = `${API_BASE}/api/calls/history?${query}`;
         const [callsResp, roomsResp] = await Promise.all([
-          fetch(callsUrl),
-          fetch(`${API_BASE}/api/rooms`),
+          fetch(callsHistoryUrl(query)),
+          fetch(roomsApiUrl()),
         ]);
         const callsData = await callsResp.json();
         const roomsData = await roomsResp.json();

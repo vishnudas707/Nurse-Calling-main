@@ -11,7 +11,7 @@ import { saveAs } from "file-saver";
 import * as XLSX from "xlsx";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-import { API_BASE } from "./lib/report-utils";
+import { callsHistoryUrl, roomsApiUrl } from "./lib/report-utils";
 
 export default function ReportsPage() {
   const [calls, setCalls] = useState<any[]>([]);
@@ -43,11 +43,9 @@ export default function ReportsPage() {
         if (mutedFilter) params.push(`muted=${encodeURIComponent(mutedFilter)}`);
         params.push(`page=${page}`);
         params.push(`pageSize=${pageSize}`);
-        const callsUrl = `${API_BASE}/api/calls/history${params.length ? "?" + params.join("&") : ""}`;
-
         const [callsResp, roomsResp] = await Promise.all([
-          fetch(callsUrl),
-          fetch(`${API_BASE}/api/rooms`),
+          fetch(callsHistoryUrl(params.join("&"))),
+          fetch(roomsApiUrl()),
         ]);
         const callsData = await callsResp.json();
         const roomsData = await roomsResp.json();
