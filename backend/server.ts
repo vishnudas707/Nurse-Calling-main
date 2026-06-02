@@ -672,11 +672,15 @@ app.get("/api/callstatus/insert", async (req: Request, res: Response) => {
     const isReset = statusNumber === 0;
     const isActivate = !Number.isNaN(statusNumber) && statusNumber !== 0;
 
-    // Lookup roomId from Room table using roomNo_deviceNumber and floor
+    // Lookup roomId from Room table using organisation + device number + floor
+    // (Prevents collisions when multiple organisations reuse same dnum/floor)
     const roomResult = await pool.request()
+      .input('organisationId', sql.NVarChar(50), String(orgId))
       .input('roomNo_deviceNo', sql.NVarChar(100), dnum)
       .input('floor', sql.Int, Number(floor))
-      .query(`SELECT id FROM [Room] WHERE roomNo_deviceNo = @roomNo_deviceNo AND floor = @floor`);
+      .query(
+        `SELECT id FROM [Room] WHERE organisationId = @organisationId AND roomNo_deviceNo = @roomNo_deviceNo AND floor = @floor`
+      );
     if (!roomResult.recordset.length) {
       return res.status(404).json({ result: "FAILURE", error: "Room not found for given roomNo_deviceNumber and floor" });
     }
