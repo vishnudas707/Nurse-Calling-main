@@ -17,6 +17,47 @@ import { io, Socket } from "socket.io-client";
     const [socket, setSocket] = useState<Socket | null>(null);
     const [organisationId, setOrganisationId] = useState<string | null>(null);
 
+    function getCallTheme(status: unknown, muted: unknown) {
+      if (muted === true) {
+        return {
+          bg: "bg-gray-200 dark:bg-gray-700",
+          title: "text-gray-500 dark:text-gray-200",
+          sub: "text-gray-500 dark:text-gray-300",
+          meta: "text-gray-400 dark:text-gray-400",
+          label: "Muted",
+        };
+      }
+
+      if (status === 2) {
+        return {
+          bg: "bg-red-100 dark:bg-red-900",
+          title: "text-red-800 dark:text-red-100",
+          sub: "text-red-700 dark:text-red-200",
+          meta: "text-red-600 dark:text-red-300",
+          label: "Emergency",
+        };
+      }
+
+      if (status === 3) {
+        return {
+          bg: "bg-blue-100 dark:bg-blue-900",
+          title: "text-blue-800 dark:text-blue-100",
+          sub: "text-blue-700 dark:text-blue-200",
+          meta: "text-blue-600 dark:text-blue-300",
+          label: "Code Blue",
+        };
+      }
+
+      // status=1 (normal) is default
+      return {
+        bg: "bg-green-100 dark:bg-green-900",
+        title: "text-green-800 dark:text-green-100",
+        sub: "text-green-700 dark:text-green-200",
+        meta: "text-green-600 dark:text-green-300",
+        label: "Normal",
+      };
+    }
+
     function speakText(
       text: string,
       {
@@ -248,17 +289,20 @@ import { io, Socket } from "socket.io-client";
                 <div className="col-span-6 text-center text-gray-600 dark:text-gray-300 py-8">No active calls</div>
               ) : (
                 activeCalls.map((call) => (
+                  (() => {
+                    const theme = getCallTheme(call.status, call.muted);
+                    return (
                   <div
                     key={call.id || call.roomId}
-                    className={`flex flex-col items-center justify-center rounded-lg p-6 ${call.muted ? 'bg-gray-200 dark:bg-gray-700' : 'bg-red-100 dark:bg-red-900'}`}
+                    className={`flex flex-col items-center justify-center rounded-lg p-6 ${theme.bg}`}
                   >
-                    <p className={`text-4xl font-bold ${call.muted ? 'text-gray-500 dark:text-gray-200' : 'text-red-800 dark:text-red-100'}`}>
+                    <p className={`text-4xl font-bold ${theme.title}`}>
                       {call.roomName}
                     </p>
-                    <p className={`mt-2 text-sm font-medium ${call.muted ? 'text-gray-500 dark:text-gray-300' : 'text-red-700 dark:text-red-200'}`}>
-                      {call.status === 1 ? 'Active' : call.status === 0 ? 'Resolved' : call.status}
+                    <p className={`mt-2 text-sm font-medium ${theme.sub}`}>
+                      {theme.label}
                     </p>
-                    <p className={`mt-1 text-xs ${call.muted ? 'text-gray-400 dark:text-gray-400' : 'text-red-600 dark:text-red-300'}`}>
+                    <p className={`mt-1 text-xs ${theme.meta}`}>
                       {call.minutesAgo !== undefined ? `${call.minutesAgo} min${call.minutesAgo === 1 ? '' : 's'} ago` : ''}
                     </p>
                     {/* Mute status UI and toggle */}
@@ -294,6 +338,8 @@ import { io, Socket } from "socket.io-client";
                       </div>
                     )}
                   </div>
+                    );
+                  })()
                 ))
               )}
             </div>
@@ -356,12 +402,18 @@ import { io, Socket } from "socket.io-client";
                         <div className="text-right">
                           <span
                             className={`inline-block rounded-full px-3 py-1 text-xs font-semibold ${
-                              item.status === "Resolved" ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
-                                : item.status === "Active" ? "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
+                              item.status === 1 ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
+                                : item.status === 2 ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
+                                : item.status === 3 ? "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
+                                : item.status === 0 ? "bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200"
                                 : "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200"
                             }`}
                           >
-                            {item.status}
+                            {item.status === 1 ? "Normal"
+                              : item.status === 2 ? "Emergency"
+                              : item.status === 3 ? "Code Blue"
+                              : item.status === 0 ? "Reset"
+                              : item.status}
                           </span>
                           <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">
                             {item.timestamp ? new Date(item.timestamp).toLocaleString() : ''}

@@ -429,7 +429,7 @@ app.get("/api/calls/active", async (req: Request, res: Response) => {
 });
 
 app.post("/api/calls", async (req: Request, res: Response) => {
-  const { roomId, organisationId } = req.body;
+  const { roomId, organisationId, status } = req.body;
   if (!roomId || !organisationId) {
     return res.status(400).json({ error: "Room ID and organisationId are required" });
   }
@@ -452,10 +452,12 @@ app.post("/api/calls", async (req: Request, res: Response) => {
 
     const callId = `CALL_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
     const now = new Date();
+    const statusNumber = Number(status);
+    const currentStatus = [1, 2, 3].includes(statusNumber) ? statusNumber : 1;
     const insertReq = pool.request();
     insertReq.input("id", sql.NVarChar(50), callId);
     insertReq.input("roomId", sql.NVarChar(50), roomId);
-    insertReq.input("currentStatus", sql.Int, 1); // 1 - Active
+    insertReq.input("currentStatus", sql.Int, currentStatus);
     insertReq.input("dateTime", sql.DateTime, now);
     insertReq.input("isMuted", sql.Int, 0);
     insertReq.input("mutedDateTime", sql.DateTime, null);
@@ -474,7 +476,7 @@ app.post("/api/calls", async (req: Request, res: Response) => {
       id: callId,
       roomId,
       roomName,
-      status: 1,
+      status: currentStatus,
       timestamp: now,
       minutesAgo: 0,
       muted: false,
@@ -625,7 +627,7 @@ app.get("/api/calls/history", async (req: Request, res: Response) => {
       id: row.id,
       roomId: row.roomId,
       roomName: row.roomName || '',
-      status: row.currentStatus === true ? 'Active' : row.currentStatus === false ? 'Resolved' : row.currentStatus,
+      status: row.currentStatus,
       timestamp: row.dateTime,
       muted: row.isMuted === 1 || row.isMuted === true,
       mutedDateTime: row.mutedDateTime,
@@ -750,7 +752,7 @@ app.get("/api/callstatus/insert", async (req: Request, res: Response) => {
     const now = new Date();
     insertReq.input("dateTime", sql.DateTime, now);
     insertReq.input("isMuted", sql.Int, 0);
-    insertReq.input("mutedDateTime", sql.DateTime, 0 ? now : null);
+    insertReq.input("mutedDateTime", sql.DateTime, null);
     if (isActivate) { insertReq.input("dateTimeReset", sql.DateTime, null); }
     else { insertReq.input("dateTimeReset", sql.DateTime, now); }
     const insertQuery = `INSERT INTO [CallStatus] (id, roomId, currentStatus, dateTime, isMuted, mutedDateTime, dateTimeReset) VALUES (@id, @roomId, @currentStatus, @dateTime, @isMuted, @mutedDateTime, @dateTimeReset)`;

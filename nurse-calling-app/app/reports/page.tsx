@@ -72,7 +72,12 @@ export default function ReportsPage() {
       "Room": call.roomName,
       "Department": getDepartmentTypeName(Number(call.departmentType)),
       "Floor": call.floor || '',
-      "Status": call.status === 1 ? "Active" : call.status === 0 ? "Resolved" : call.status,
+      "Status":
+        call.status === 1 ? "Normal" :
+        call.status === 2 ? "Emergency" :
+        call.status === 3 ? "Code Blue" :
+        call.status === 0 ? "Reset" :
+        call.status,
       "Muted": call.muted ? "Muted" : "Unmuted",
       "Created": call.timestamp ? new Date(call.timestamp).toLocaleString() : '',
       "Muted At": call.mutedDateTime ? new Date(call.mutedDateTime).toLocaleString() : '',
@@ -97,7 +102,11 @@ export default function ReportsPage() {
         call.roomName,
         getDepartmentTypeName(Number(call.departmentType)),
         call.floor || '',
-        call.status === 1 ? "Active" : call.status === 0 ? "Resolved" : call.status,
+        call.status === 1 ? "Normal"
+          : call.status === 2 ? "Emergency"
+          : call.status === 3 ? "Code Blue"
+          : call.status === 0 ? "Reset"
+          : call.status,
         call.muted ? "Muted" : "Unmuted",
         call.timestamp ? new Date(call.timestamp).toLocaleString() : '',
         call.mutedDateTime ? new Date(call.mutedDateTime).toLocaleString() : '',
