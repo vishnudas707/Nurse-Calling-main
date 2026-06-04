@@ -27,3 +27,25 @@ export const getRoomTypeName = (roomType: number): string => {
 export const getDepartmentTypeName = (departmentType: number): string => {
   return DEPARTMENT_TYPE_MAP[departmentType] || `Unknown (${departmentType})`;
 };
+
+/** Device / dashboard call status (permanent color by status, not by refresh time) */
+export const CALL_STATUS_MAP: Record<
+  number,
+  { label: string; color: "gray" | "green" | "red" | "blue" }
+> = {
+  0: { label: "Reset", color: "gray" },
+  1: { label: "Normal", color: "green" },
+  2: { label: "Emergency", color: "red" },
+  3: { label: "Code Blue", color: "blue" },
+};
+
+export const getCallStatusMeta = (status: number) =>
+  CALL_STATUS_MAP[status] ?? { label: `Unknown (${status})`, color: "gray" as const };
+
+export const isValidCallStatus = (status: number) =>
+  !Number.isNaN(status) && status >= 0 && status <= 3;
+
+export const withCallStatusFields = <T extends { status: number }>(call: T) => {
+  const { label, color } = getCallStatusMeta(call.status);
+  return { ...call, statusLabel: label, color };
+};

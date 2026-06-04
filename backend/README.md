@@ -55,6 +55,31 @@ npm start
 - `POST /api/calls` - Create a new call
 - `PUT /api/calls/:id` - Update call status
 
+### Device call status (hardware integration)
+- `GET /api/callstatus` - API contract, status codes, and example URL
+- `GET /api/callstatus/insert` - Report room call states from devices
+
+**Insert URL example:**
+```
+GET /api/callstatus/insert?orgId=00001&hid=1234567890&floor=2&r1=0&r2=2
+```
+
+| Query | Description |
+|-------|-------------|
+| `orgId` | Organisation ID |
+| `hid` | 10-digit hardware ID |
+| `floor` | Floor number |
+| `r{roomNo}` | Room device number → status (repeat for multiple rooms) |
+
+| Status | Meaning | Color |
+|--------|---------|-------|
+| `0` | Reset | gray |
+| `1` | Normal call | green |
+| `2` | Emergency | red |
+| `3` | Code blue | blue |
+
+**Insert response:** plain text `SUCCESS` when all rooms succeed, otherwise `FAILURE` (no JSON body).
+
 ### Health Check
 - `GET /api/health` - Server health status
 

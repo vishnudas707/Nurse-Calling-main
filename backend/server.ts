@@ -7,7 +7,16 @@ import dotenv from "dotenv";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import { getPool, sql } from "./db";
-import { ROOM_TYPE_MAP, DEPARTMENT_TYPE_MAP, getRoomTypeName, getDepartmentTypeName, } from "./constants";
+import {
+  ROOM_TYPE_MAP,
+  DEPARTMENT_TYPE_MAP,
+  getRoomTypeName,
+  getDepartmentTypeName,
+  CALL_STATUS_MAP,
+  getCallStatusMeta,
+  isValidCallStatus,
+  withCallStatusFields,
+} from "./constants";
 
 dotenv.config();
 
@@ -408,16 +417,18 @@ app.get("/api/calls/active", async (req: Request, res: Response) => {
     query += ` ORDER BY cs.[dateTime] DESC`;
     const result = await request.query(query);
     const now = Date.now();
-    const calls = result.recordset.map((row: any) => ({
-      id: row.id,
-      roomId: row.roomId,
-      roomName: row.roomName || '',
-      status: row.currentStatus,
-      timestamp: row.dateTime,
-      minutesAgo: row.dateTime ? Math.floor((now - new Date(row.dateTime).getTime()) / 60000) : null,
-      muted: row.isMuted === 1 || row.isMuted === true,
-      dateTimeReset: row.dateTimeReset,
-    }));
+    const calls = result.recordset.map((row: any) =>
+      withCallStatusFields({
+        id: row.id,
+        roomId: row.roomId,
+        roomName: row.roomName || '',
+        status: row.currentStatus,
+        timestamp: row.dateTime,
+        minutesAgo: row.dateTime ? Math.floor((now - new Date(row.dateTime).getTime()) / 60000) : null,
+        muted: row.isMuted === 1 || row.isMuted === true,
+        dateTimeReset: row.dateTimeReset,
+      })
+    );
     res.status(200).json({
       success: true,
       data: calls,
@@ -472,7 +483,7 @@ app.post("/api/calls", async (req: Request, res: Response) => {
       .query(`SELECT roomName FROM [Room] WHERE id = @id`);
     const roomName = roomInfo.recordset.length ? roomInfo.recordset[0].roomName : '';
 
-    const newCall = {
+    const newCall = withCallStatusFields({
       id: callId,
       roomId,
       roomName,
@@ -482,7 +493,7 @@ app.post("/api/calls", async (req: Request, res: Response) => {
       muted: false,
       dateTimeReset: null,
       organisationId
-    };
+    });
 
     io.to(`org_${organisationId}`).emit("call:new", newCall);
     return res.status(201).json({ success: true, data: newCall });
@@ -529,18 +540,20 @@ app.put("/api/calls/:id", async (req: Request, res: Response) => {
        WHERE cs.[id] = @id`
     );
     const row = result.recordset[0];
-    const call = row ? {
-      id: row.id,
-      roomId: row.roomId,
-      roomName: row.roomName || '',
-      status: row.currentStatus,
-      timestamp: row.dateTime,
-      minutesAgo: row.dateTime ? Math.floor((Date.now() - new Date(row.dateTime).getTime()) / 60000) : null,
-      muted: row.isMuted === 1 || row.isMuted === true,
-      mutedDateTime: row.mutedDateTime,
-      dateTimeReset: row.dateTimeReset,
-      organisationId
-    } : null;
+    const call = row
+      ? withCallStatusFields({
+          id: row.id,
+          roomId: row.roomId,
+          roomName: row.roomName || '',
+          status: row.currentStatus,
+          timestamp: row.dateTime,
+          minutesAgo: row.dateTime ? Math.floor((Date.now() - new Date(row.dateTime).getTime()) / 60000) : null,
+          muted: row.isMuted === 1 || row.isMuted === true,
+          mutedDateTime: row.mutedDateTime,
+          dateTimeReset: row.dateTimeReset,
+          organisationId
+        })
+      : null;
 
     // Broadcast to org room
     if (muted !== undefined) {
@@ -623,27 +636,27 @@ app.get("/api/calls/history", async (req: Request, res: Response) => {
     // Add pagination to main query
     query += ` OFFSET ${(Number(page) - 1) * Number(pageSize)} ROWS FETCH NEXT ${Number(pageSize)} ROWS ONLY`;
     const result = await reqDb.query(query);
-    const calls = result.recordset.map((row: any) => ({
-      id: row.id,
-      roomId: row.roomId,
-      roomName: row.roomName || '',
-      status: row.currentStatus,
-      timestamp: row.dateTime,
-      muted: row.isMuted === 1 || row.isMuted === true,
-      mutedDateTime: row.mutedDateTime,
-      dateTimeReset: row.dateTimeReset,
-      departmentType: row.departmentType,
-      roomType: row.roomType,
-      floor: row.floor,
-      repeatCount: row.repeatCount || 0,
-      lastRepeatAt: row.lastRepeatAt,
-      // Repeat duration is measured from after the call start time (dateTime) to the latest repeatAt.
-      // If there is no repeat, this will be null.
-      repeatDurationMinutes:
-        row.lastRepeatAt && row.dateTime
-          ? Math.max(0, Math.floor((new Date(row.lastRepeatAt).getTime() - new Date(row.dateTime).getTime()) / 60000))
-          : null,
-    }));
+    const calls = result.recordset.map((row: any) =>
+      withCallStatusFields({
+        id: row.id,
+        roomId: row.roomId,
+        roomName: row.roomName || '',
+        status: row.currentStatus,
+        timestamp: row.dateTime,
+        muted: row.isMuted === 1 || row.isMuted === true,
+        mutedDateTime: row.mutedDateTime,
+        dateTimeReset: row.dateTimeReset,
+        departmentType: row.departmentType,
+        roomType: row.roomType,
+        floor: row.floor,
+        repeatCount: row.repeatCount || 0,
+        lastRepeatAt: row.lastRepeatAt,
+        repeatDurationMinutes:
+          row.lastRepeatAt && row.dateTime
+            ? Math.max(0, Math.floor((new Date(row.lastRepeatAt).getTime() - new Date(row.dateTime).getTime()) / 60000))
+            : null,
+      })
+    );
     res.status(200).json({
       success: true,
       data: calls,
@@ -657,124 +670,194 @@ app.get("/api/calls/history", async (req: Request, res: Response) => {
     res.status(500).json({ success: false, error: 'Failed to fetch call history' });
   }
 });
+// Parse r{roomNo}=status from query (e.g. r1=0&r2=2). Status: 0=reset, 1=normal, 2=emergency, 3=code blue
+function parseRoomStatusParams(query: Request["query"]): { roomNo: string; status: number }[] {
+  const rooms: { roomNo: string; status: number }[] = [];
+  for (const key of Object.keys(query)) {
+    const match = /^r(\d+)$/i.exec(key);
+    if (!match) continue;
+    const raw = query[key];
+    const statusVal = Array.isArray(raw) ? raw[0] : raw;
+    if (statusVal === undefined || statusVal === "") continue;
+    rooms.push({ roomNo: match[1], status: Number(statusVal) });
+  }
+  return rooms;
+}
+
+async function processCallStatusForRoom(
+  pool: Awaited<ReturnType<typeof getPool>>,
+  orgId: string,
+  floor: string,
+  dnum: string,
+  statusNumber: number,
+  repeatEnabled: boolean
+): Promise<{ httpStatus: number; result: string; message?: string; error?: string }> {
+  const isReset = statusNumber === 0;
+  const isActivate = !Number.isNaN(statusNumber) && statusNumber !== 0;
+
+  const roomResult = await pool.request()
+    .input('organisationId', sql.NVarChar(50), String(orgId))
+    .input('roomNo_deviceNo', sql.NVarChar(100), dnum)
+    .input('floor', sql.Int, Number(floor))
+    .query(
+      `SELECT id FROM [Room] WHERE organisationId = @organisationId AND roomNo_deviceNo = @roomNo_deviceNo AND floor = @floor`
+    );
+  if (!roomResult.recordset.length) {
+    return { httpStatus: 404, result: "FAILURE", error: `Room not found for room ${dnum} on floor ${floor}` };
+  }
+  const roomId = roomResult.recordset[0].id;
+  const activeCallResult = await pool.request()
+    .input('roomId', sql.NVarChar(50), roomId)
+    .query(`SELECT TOP 1 id, currentStatus, dateTime, isMuted, dateTimeReset FROM [CallStatus] WHERE roomId = @roomId AND currentStatus <> 0 ORDER BY dateTime DESC`);
+  if (activeCallResult.recordset.length > 0 && isActivate) {
+    const existing = activeCallResult.recordset[0];
+
+    if (repeatEnabled) {
+      try {
+        await pool.request()
+          .input('callId', sql.NVarChar(50), existing.id)
+          .input('roomId', sql.NVarChar(50), roomId)
+          .input('organisationId', sql.NVarChar(50), String(orgId))
+          .input('repeatAt', sql.DateTime, new Date())
+          .query(`INSERT INTO [CallRepeat] (callId, roomId, organisationId, repeatAt) VALUES (@callId, @roomId, @organisationId, @repeatAt)`);
+      } catch (repeatErr) {
+        console.error('[CALLSTATUS INSERT] Failed to log repeat:', repeatErr);
+      }
+    }
+
+    const roomInfo = await pool.request().input('id', sql.NVarChar(50), roomId).query(`SELECT roomName FROM [Room] WHERE id = @id`);
+    const roomName = roomInfo.recordset.length ? roomInfo.recordset[0].roomName : '';
+
+    io.to(`org_${orgId}`).emit("call:new", withCallStatusFields({
+      id: existing.id,
+      roomId,
+      roomName,
+      status: existing.currentStatus,
+      timestamp: existing.dateTime || new Date(),
+      muted: existing.isMuted === 1 || existing.isMuted === true,
+      dateTimeReset: existing.dateTimeReset,
+      minutesAgo: 0
+    }));
+
+    return {
+      httpStatus: 200,
+      result: "SUCCESS",
+      message: `Room ${dnum}: repeated call — announcement broadcast (call record unchanged)`,
+    };
+  }
+  if (activeCallResult.recordset.length > 0 && isReset) {
+    const callId = activeCallResult.recordset[0].id;
+    await pool.request()
+      .input('id', sql.NVarChar(50), callId)
+      .input('currentStatus', sql.Int, 0)
+      .input('dateTimeReset', sql.DateTime, new Date())
+      .query(`UPDATE [CallStatus] SET currentStatus = @currentStatus, dateTimeReset = @dateTimeReset WHERE id = @id`);
+    io.to(`org_${orgId}`).emit("call:status", { id: callId, status: 0 });
+    return { httpStatus: 200, result: "SUCCESS", message: `Room ${dnum}: call status reset` };
+  }
+  if (!isActivate && !isReset) {
+    return { httpStatus: 400, result: "FAILURE", error: `Room ${dnum}: invalid status (use 0=reset, 1=normal, 2=emergency, 3=code blue)` };
+  }
+  const callId = `CALL_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+  const insertReq = pool.request();
+  insertReq.input("id", sql.NVarChar(50), callId);
+  insertReq.input("roomId", sql.NVarChar(50), roomId);
+  insertReq.input("currentStatus", sql.Int, statusNumber);
+  const now = new Date();
+  insertReq.input("dateTime", sql.DateTime, now);
+  insertReq.input("isMuted", sql.Int, 0);
+  insertReq.input("mutedDateTime", sql.DateTime, null);
+  if (isActivate) { insertReq.input("dateTimeReset", sql.DateTime, null); }
+  else { insertReq.input("dateTimeReset", sql.DateTime, now); }
+  const insertQuery = `INSERT INTO [CallStatus] (id, roomId, currentStatus, dateTime, isMuted, mutedDateTime, dateTimeReset) VALUES (@id, @roomId, @currentStatus, @dateTime, @isMuted, @mutedDateTime, @dateTimeReset)`;
+  await insertReq.query(insertQuery);
+  const roomInfo = await pool.request().input('id', sql.NVarChar(50), roomId).query(`SELECT roomName FROM [Room] WHERE id = @id`);
+  const roomName = roomInfo.recordset.length ? roomInfo.recordset[0].roomName : '';
+  io.to(`org_${orgId}`).emit("call:new", withCallStatusFields({
+    id: callId,
+    roomId,
+    roomName,
+    status: statusNumber,
+    timestamp: now,
+    muted: false,
+    dateTimeReset: isActivate ? null : now,
+    minutesAgo: 0
+  }));
+  return { httpStatus: 200, result: "SUCCESS", message: `Room ${dnum}: new call inserted (status ${statusNumber})` };
+}
+
+// Call status API contract (device integration)
+app.get("/api/callstatus", (req: Request, res: Response) => {
+  const base = `${req.protocol}://${req.get("host")}`;
+  res.status(200).json({
+    insertEndpoint: `${base}/api/callstatus/insert`,
+    method: "GET",
+    example: `${base}/api/callstatus/insert?orgId=00001&hid=1234567890&floor=2&r1=0&r2=2`,
+    queryParams: {
+      orgId: "required — organisation id",
+      hid: "required — 10-digit hardware id",
+      floor: "required — floor number",
+      "r{roomNo}": "required (one or more) — room device number with status value",
+    },
+    statusCodes: CALL_STATUS_MAP,
+  });
+});
+
 // Insert record into CallStatus via GET (for device integration)
+// URL: /api/callstatus/insert?orgId=00001&hid=1234567890&floor=2&r1=0&r2=2
+// r{roomNo}=0 reset | 1 normal (green) | 2 emergency (red) | 3 code blue (blue)
 app.get("/api/callstatus/insert", async (req: Request, res: Response) => {
+  const sendCallStatusResult = (httpStatus: number, ok: boolean) =>
+    res.status(httpStatus).type("text/plain").send(ok ? "SUCCESS" : "FAILURE");
+
   const { orgId, hid, dnum, status, floor } = req.query;
-  if (!orgId || !hid || !dnum || status === undefined || floor === undefined || floor === "") {
-    return res.status(400).json({ result: "FAILURE", error: "Missing orgId, hid, dnum, status, or floor" });
+  if (!orgId || !hid || floor === undefined || floor === "") {
+    return sendCallStatusResult(400, false);
   }
   const hidStr = String(hid);
   if (!/^\d{10}$/.test(hidStr)) {
-    return res.status(400).json({ result: "FAILURE", error: "hid must be a 10-digit number" });
+    return sendCallStatusResult(400, false);
   }
+  const floorStr = String(Array.isArray(floor) ? floor[0] : floor);
+
+  let roomUpdates = parseRoomStatusParams(req.query);
+  if (roomUpdates.length === 0) {
+    if (!dnum || status === undefined) {
+      return sendCallStatusResult(400, false);
+    }
+    roomUpdates = [{ roomNo: String(dnum), status: Number(status) }];
+  }
+
+  for (const { status: statusNumber } of roomUpdates) {
+    if (!isValidCallStatus(statusNumber)) {
+      return sendCallStatusResult(400, false);
+    }
+  }
+
   try {
     const pool = await getPool();
     const repeatEnabled = await hasCallRepeatTable(pool);
-    const statusNumber = Number(status);
-    const isReset = statusNumber === 0;
-    const isActivate = !Number.isNaN(statusNumber) && statusNumber !== 0;
+    let worstStatus = 200;
+    let allSuccess = true;
 
-    // Lookup roomId from Room table using organisation + device number + floor
-    // (Prevents collisions when multiple organisations reuse same dnum/floor)
-    const roomResult = await pool.request()
-      .input('organisationId', sql.NVarChar(50), String(orgId))
-      .input('roomNo_deviceNo', sql.NVarChar(100), dnum)
-      .input('floor', sql.Int, Number(floor))
-      .query(
-        `SELECT id FROM [Room] WHERE organisationId = @organisationId AND roomNo_deviceNo = @roomNo_deviceNo AND floor = @floor`
+    for (const { roomNo, status: statusNumber } of roomUpdates) {
+      const outcome = await processCallStatusForRoom(
+        pool,
+        String(orgId),
+        floorStr,
+        roomNo,
+        statusNumber,
+        repeatEnabled
       );
-    if (!roomResult.recordset.length) {
-      return res.status(404).json({ result: "FAILURE", error: "Room not found for given roomNo_deviceNumber and floor" });
+      if (outcome.result !== "SUCCESS") allSuccess = false;
+      if (outcome.httpStatus > worstStatus) worstStatus = outcome.httpStatus;
     }
-    const roomId = roomResult.recordset[0].id;
-    // Check for existing active call for this room
-    const activeCallResult = await pool.request()
-      .input('roomId', sql.NVarChar(50), roomId)
-      .query(`SELECT TOP 1 id, currentStatus, dateTime, isMuted, dateTimeReset FROM [CallStatus] WHERE roomId = @roomId AND currentStatus <> 0 ORDER BY dateTime DESC`);
-    if (activeCallResult.recordset.length > 0 && isActivate) {
-      // Already active: do not create duplicates, but re-announce to dashboard
-      const existing = activeCallResult.recordset[0];
 
-      // Log the repeated call timestamp for reporting
-      if (repeatEnabled) {
-        try {
-          await pool.request()
-            .input('callId', sql.NVarChar(50), existing.id)
-            .input('roomId', sql.NVarChar(50), roomId)
-            .input('organisationId', sql.NVarChar(50), String(orgId))
-            .input('repeatAt', sql.DateTime, new Date())
-            .query(`INSERT INTO [CallRepeat] (callId, roomId, organisationId, repeatAt) VALUES (@callId, @roomId, @organisationId, @repeatAt)`);
-        } catch (repeatErr) {
-          console.error('[CALLSTATUS INSERT] Failed to log repeat:', repeatErr);
-        }
-      }
-
-      const roomInfo = await pool.request().input('id', sql.NVarChar(50), roomId).query(`SELECT roomName FROM [Room] WHERE id = @id`);
-      const roomName = roomInfo.recordset.length ? roomInfo.recordset[0].roomName : '';
-
-      io.to(`org_${orgId}`).emit("call:new", {
-        id: existing.id,
-        roomId,
-        roomName,
-        status: existing.currentStatus,
-        timestamp: existing.dateTime || new Date(),
-        muted: existing.isMuted === 1 || existing.isMuted === true,
-        dateTimeReset: existing.dateTimeReset,
-        minutesAgo: 0
-      });
-
-      return res.status(200).json({
-        result: "SUCCESS",
-        message: "Repeated call — announcement broadcast to dashboard (call record unchanged)",
-      });
-    }
-    if (activeCallResult.recordset.length > 0 && isReset) {
-      // Update status to 0 (reset the existing active call)
-      const callId = activeCallResult.recordset[0].id;
-      await pool.request()
-        .input('id', sql.NVarChar(50), callId)
-        .input('currentStatus', sql.Int, 0)
-        .input('dateTimeReset', sql.DateTime, new Date())
-        .query(`UPDATE [CallStatus] SET currentStatus = @currentStatus, dateTimeReset = @dateTimeReset WHERE id = @id`);
-      // Emit socket event for reset
-      io.to(`org_${orgId}`).emit("call:status", { id: callId, status: 0 });
-      return res.status(200).json({ result: "SUCCESS", message: "Call status reset" });
-    }
-    if (!isActivate && !isReset) {
-      return res.status(400).json({ result: "FAILURE", error: "Invalid status" });
-    }
-    // No active call, insert new
-    const callId = `CALL_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-    const insertReq = pool.request();
-    insertReq.input("id", sql.NVarChar(50), callId);
-    insertReq.input("roomId", sql.NVarChar(50), roomId);
-    insertReq.input("currentStatus", sql.Int, statusNumber); // non-zero is active, 0 is reset
-    const now = new Date();
-    insertReq.input("dateTime", sql.DateTime, now);
-    insertReq.input("isMuted", sql.Int, 0);
-    insertReq.input("mutedDateTime", sql.DateTime, null);
-    if (isActivate) { insertReq.input("dateTimeReset", sql.DateTime, null); }
-    else { insertReq.input("dateTimeReset", sql.DateTime, now); }
-    const insertQuery = `INSERT INTO [CallStatus] (id, roomId, currentStatus, dateTime, isMuted, mutedDateTime, dateTimeReset) VALUES (@id, @roomId, @currentStatus, @dateTime, @isMuted, @mutedDateTime, @dateTimeReset)`;
-    await insertReq.query(insertQuery);
-    // Fetch roomName for the card
-    const roomInfo = await pool.request().input('id', sql.NVarChar(50), roomId).query(`SELECT roomName FROM [Room] WHERE id = @id`);
-    const roomName = roomInfo.recordset.length ? roomInfo.recordset[0].roomName : '';
-    // Emit socket event for new call with full info
-    io.to(`org_${orgId}`).emit("call:new", {
-      id: callId,
-      roomId,
-      roomName,
-      status: statusNumber,
-      timestamp: now,
-      muted: false,
-      dateTimeReset: isActivate ? null : now,
-      minutesAgo: 0
-    });
-    return res.status(200).json({ result: "SUCCESS", message: "New call inserted" });
+    const httpStatus = allSuccess ? 200 : worstStatus > 200 ? worstStatus : 400;
+    return sendCallStatusResult(httpStatus, allSuccess);
   } catch (err) {
     console.error('[CALLSTATUS INSERT] Error:', err);
-    return res.status(500).json({ result: "FAILURE", error: "DB insert/update failed" });
+    return sendCallStatusResult(500, false);
   }
 });
 // Health check
