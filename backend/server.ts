@@ -747,6 +747,10 @@ async function processCallStatusForRoom(
       message: `Room ${dnum}: repeated call — announcement broadcast (call record unchanged)`,
     };
   }
+  if (activeCallResult.recordset.length === 0 && isReset) {
+    // Reset should not create a new call if none is active.
+    return { httpStatus: 200, result: "SUCCESS", message: `Room ${dnum}: reset ignored (no active call)` };
+  }
   if (activeCallResult.recordset.length > 0 && isReset) {
     const callId = activeCallResult.recordset[0].id;
     await pool.request()

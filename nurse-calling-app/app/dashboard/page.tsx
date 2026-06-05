@@ -16,6 +16,7 @@ import { io, Socket } from "socket.io-client";
     const [error, setError] = useState("");
     const [socket, setSocket] = useState<Socket | null>(null);
     const [organisationId, setOrganisationId] = useState<string | null>(null);
+    const [, forceTimeTick] = useState(0);
 
     function getCallTheme(status: unknown, muted: unknown) {
       if (muted === true) {
@@ -148,6 +149,10 @@ import { io, Socket } from "socket.io-client";
     const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5001";
   
     useEffect(() => {
+      const tickId = window.setInterval(() => {
+        forceTimeTick((x) => x + 1);
+      }, 30 * 1000);
+
       const orgId = getOrganisationId();
       setOrganisationId(orgId);
       const orgQuery = orgId ? `?organisationId=${encodeURIComponent(orgId)}` : "";
@@ -244,6 +249,7 @@ import { io, Socket } from "socket.io-client";
       });
   
       return () => {
+        window.clearInterval(tickId);
         window.clearInterval(refreshIntervalId);
         s.disconnect();
       };
@@ -303,7 +309,14 @@ import { io, Socket } from "socket.io-client";
                       {theme.label}
                     </p>
                     <p className={`mt-1 text-xs ${theme.meta}`}>
-                      {call.minutesAgo !== undefined ? `${call.minutesAgo} min${call.minutesAgo === 1 ? '' : 's'} ago` : ''}
+                      {(() => {
+                        const mins = call?.timestamp
+                          ? Math.floor((Date.now() - new Date(call.timestamp).getTime()) / 60000)
+                          : call?.minutesAgo;
+                        return mins !== undefined && mins !== null
+                          ? `${mins} min${mins === 1 ? "" : "s"} ago`
+                          : "";
+                      })()}
                     </p>
                     {/* Mute status UI and toggle */}
                     {call.muted !== undefined && (
