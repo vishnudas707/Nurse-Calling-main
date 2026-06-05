@@ -670,7 +670,8 @@ app.get("/api/calls/history", async (req: Request, res: Response) => {
     res.status(500).json({ success: false, error: 'Failed to fetch call history' });
   }
 });
-// Parse r{roomNo}=status from query (e.g. r1=0&r2=2). Status: 0=reset, 1=normal, 2=emergency, 3=code blue
+// Parse r{roomNo}=status from query (e.g. r01=1&r02=2&r22=3). Room keys are 2-digit zero-padded.
+// Status: 0=reset, 1=normal, 2=emergency, 3=code blue
 function parseRoomStatusParams(query: Request["query"]): { roomNo: string; status: number }[] {
   const rooms: { roomNo: string; status: number }[] = [];
   for (const key of Object.keys(query)) {
@@ -679,7 +680,8 @@ function parseRoomStatusParams(query: Request["query"]): { roomNo: string; statu
     const raw = query[key];
     const statusVal = Array.isArray(raw) ? raw[0] : raw;
     if (statusVal === undefined || statusVal === "") continue;
-    rooms.push({ roomNo: match[1], status: Number(statusVal) });
+    // r01/r02 in URL map to roomNo_deviceNo 1/2 in the database
+    rooms.push({ roomNo: String(parseInt(match[1], 10)), status: Number(statusVal) });
   }
   return rooms;
 }
@@ -792,19 +794,19 @@ app.get("/api/callstatus", (req: Request, res: Response) => {
   res.status(200).json({
     insertEndpoint: `${base}/api/callstatus/insert`,
     method: "GET",
-    example: `${base}/api/callstatus/insert?orgId=00001&hid=1234567890&floor=2&r1=0&r2=2`,
+    example: `${base}/api/callstatus/insert?orgId=00001&hid=1234567890&floor=1&r01=1&r02=2&r22=3`,
     queryParams: {
       orgId: "required — organisation id",
       hid: "required — 10-digit hardware id",
       floor: "required — floor number",
-      "r{roomNo}": "required (one or more) — room device number with status value",
+      "r{roomNo}": "required (one or more) — 2-digit zero-padded room device number with status value (e.g. r01, r02, r22)",
     },
     statusCodes: CALL_STATUS_MAP,
   });
 });
 
 // Insert record into CallStatus via GET (for device integration)
-// URL: /api/callstatus/insert?orgId=00001&hid=1234567890&floor=2&r1=0&r2=2
+// URL: /api/callstatus/insert?orgId=00001&hid=1234567890&floor=1&r01=1&r02=2&r22=3
 // r{roomNo}=0 reset | 1 normal (green) | 2 emergency (red) | 3 code blue (blue)
 app.get("/api/callstatus/insert", async (req: Request, res: Response) => {
   const sendCallStatusResult = (httpStatus: number, ok: boolean) =>

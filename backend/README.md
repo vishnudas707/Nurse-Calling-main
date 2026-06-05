@@ -61,7 +61,7 @@ npm start
 
 **Insert URL example:**
 ```
-GET /api/callstatus/insert?orgId=00001&hid=1234567890&floor=2&r1=0&r2=2
+GET /api/callstatus/insert?orgId=00001&hid=1234567890&floor=1&r01=1&r02=2&r22=3
 ```
 
 | Query | Description |
@@ -69,7 +69,7 @@ GET /api/callstatus/insert?orgId=00001&hid=1234567890&floor=2&r1=0&r2=2
 | `orgId` | Organisation ID |
 | `hid` | 10-digit hardware ID |
 | `floor` | Floor number |
-| `r{roomNo}` | Room device number → status (repeat for multiple rooms) |
+| `r{roomNo}` | 2-digit zero-padded room device number → status (e.g. `r01`, `r02`, `r22`; repeat for multiple rooms) |
 
 | Status | Meaning | Color |
 |--------|---------|-------|
