@@ -76,6 +76,7 @@ export default function ReportsPage() {
         call.status === 1 ? "Normal" :
         call.status === 2 ? "Emergency" :
         call.status === 3 ? "Code Blue" :
+        call.status === 4 ? "Toilet" :
         call.status === 0 ? "Reset" :
         call.status,
       "Muted": call.muted ? "Muted" : "Unmuted",
@@ -105,6 +106,7 @@ export default function ReportsPage() {
         call.status === 1 ? "Normal"
           : call.status === 2 ? "Emergency"
           : call.status === 3 ? "Code Blue"
+          : call.status === 4 ? "Toilet"
           : call.status === 0 ? "Reset"
           : call.status,
         call.muted ? "Muted" : "Unmuted",

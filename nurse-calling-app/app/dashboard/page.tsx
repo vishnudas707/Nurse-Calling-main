@@ -39,6 +39,16 @@ import { io, Socket } from "socket.io-client";
         };
       }
 
+      if (status === 4) {
+        return {
+          bg: "bg-red-100 dark:bg-red-900",
+          title: "text-red-800 dark:text-red-100",
+          sub: "text-red-700 dark:text-red-200",
+          meta: "text-red-600 dark:text-red-300",
+          label: "Toilet",
+        };
+      }
+
       if (status === 3) {
         return {
           bg: "bg-blue-100 dark:bg-blue-900",
@@ -418,6 +428,7 @@ import { io, Socket } from "socket.io-client";
                               item.status === 1 ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
                                 : item.status === 2 ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
                                 : item.status === 3 ? "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
+                                : item.status === 4 ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
                                 : item.status === 0 ? "bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200"
                                 : "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200"
                             }`}
@@ -425,6 +436,7 @@ import { io, Socket } from "socket.io-client";
                             {item.status === 1 ? "Normal"
                               : item.status === 2 ? "Emergency"
                               : item.status === 3 ? "Code Blue"
+                              : item.status === 4 ? "Toilet"
                               : item.status === 0 ? "Reset"
                               : item.status}
                           </span>

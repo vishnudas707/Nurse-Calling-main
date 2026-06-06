@@ -464,7 +464,7 @@ app.post("/api/calls", async (req: Request, res: Response) => {
     const callId = `CALL_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
     const now = new Date();
     const statusNumber = Number(status);
-    const currentStatus = [1, 2, 3].includes(statusNumber) ? statusNumber : 1;
+    const currentStatus = [1, 2, 3, 4].includes(statusNumber) ? statusNumber : 1;
     const insertReq = pool.request();
     insertReq.input("id", sql.NVarChar(50), callId);
     insertReq.input("roomId", sql.NVarChar(50), roomId);
@@ -671,7 +671,7 @@ app.get("/api/calls/history", async (req: Request, res: Response) => {
   }
 });
 // Parse r{roomNo}=status from query (e.g. r01=1&r02=2&r22=3). Room keys are 2-digit zero-padded.
-// Status: 0=reset, 1=normal, 2=emergency, 3=code blue
+// Status: 0=reset, 1=normal, 2=emergency, 3=code blue, 4=toilet
 function parseRoomStatusParams(query: Request["query"]): { roomNo: string; status: number }[] {
   const rooms: { roomNo: string; status: number }[] = [];
   for (const key of Object.keys(query)) {
@@ -762,7 +762,7 @@ async function processCallStatusForRoom(
     return { httpStatus: 200, result: "SUCCESS", message: `Room ${dnum}: call status reset` };
   }
   if (!isActivate && !isReset) {
-    return { httpStatus: 400, result: "FAILURE", error: `Room ${dnum}: invalid status (use 0=reset, 1=normal, 2=emergency, 3=code blue)` };
+    return { httpStatus: 400, result: "FAILURE", error: `Room ${dnum}: invalid status (use 0=reset, 1=normal, 2=emergency, 3=code blue, 4=toilet)` };
   }
   const callId = `CALL_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
   const insertReq = pool.request();
@@ -811,7 +811,7 @@ app.get("/api/callstatus", (req: Request, res: Response) => {
 
 // Insert record into CallStatus via GET (for device integration)
 // URL: /api/callstatus/insert?orgId=00001&hid=1234567890&floor=1&r01=1&r02=2&r22=3
-// r{roomNo}=0 reset | 1 normal (green) | 2 emergency (red) | 3 code blue (blue)
+// r{roomNo}=0 reset | 1 normal (green) | 2 emergency (red) | 3 code blue (blue) | 4 toilet (red)
 app.get("/api/callstatus/insert", async (req: Request, res: Response) => {
   const sendCallStatusResult = (httpStatus: number, ok: boolean) =>
     res.status(httpStatus).type("text/plain").send(ok ? "SUCCESS" : "FAILURE");

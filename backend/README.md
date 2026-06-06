@@ -77,6 +77,7 @@ GET /api/callstatus/insert?orgId=00001&hid=1234567890&floor=1&r01=1&r02=2&r22=3
 | `1` | Normal call | green |
 | `2` | Emergency | red |
 | `3` | Code blue | blue |
+| `4` | Toilet | red |
 
 **Insert response:** plain text `SUCCESS` when all rooms succeed, otherwise `FAILURE` (no JSON body).
 

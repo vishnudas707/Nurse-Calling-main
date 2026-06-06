@@ -9,6 +9,7 @@ const STATUS_OPTIONS = [
   { value: 1, label: "Normal (1)" },
   { value: 2, label: "Emergency (2)" },
   { value: 3, label: "Code Blue (3)" },
+  { value: 4, label: "Toilet (4)" },
 ] as const;
 
 type RoomRow = { id: string; roomNo: string; status: number };
