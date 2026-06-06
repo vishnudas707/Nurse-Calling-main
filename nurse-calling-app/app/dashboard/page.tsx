@@ -16,6 +16,7 @@ import { io, Socket } from "socket.io-client";
     const [error, setError] = useState("");
     const [socket, setSocket] = useState<Socket | null>(null);
     const [organisationId, setOrganisationId] = useState<string | null>(null);
+    const [organisationName, setOrganisationName] = useState<string | null>(null);
     const [, forceTimeTick] = useState(0);
 
     function getCallTheme(status: unknown, muted: unknown) {
@@ -167,6 +168,20 @@ import { io, Socket } from "socket.io-client";
       setOrganisationId(orgId);
       const orgQuery = orgId ? `?organisationId=${encodeURIComponent(orgId)}` : "";
 
+      const fetchOrganisationName = async () => {
+        if (!orgId) return;
+        try {
+          const resp = await fetch(`${API_BASE}/api/organisations/${encodeURIComponent(orgId)}`);
+          const data = await resp.json();
+          if (resp.ok && data.success && data.data?.name) {
+            setOrganisationName(data.data.name);
+          }
+        } catch (err) {
+          console.error("Error fetching organisation name", err);
+        }
+      };
+      fetchOrganisationName();
+
       const fetchActiveCalls = async () => {
         setIsLoading(true);
         setError("");
@@ -290,7 +305,13 @@ import { io, Socket } from "socket.io-client";
               </h2>
               {organisationId && (
                 <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
-                  Organisation: <span className="font-medium">{organisationId}</span>
+                  Organisation:{" "}
+                  <span className="font-medium">
+                    {organisationName || organisationId}
+                  </span>
+                  {organisationName && (
+                    <span className="text-gray-500 dark:text-gray-500"> ({organisationId})</span>
+                  )}
                 </p>
               )}
             </div>

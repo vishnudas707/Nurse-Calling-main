@@ -21,6 +21,7 @@ import {
 dotenv.config();
 
 const USER_TABLE = process.env.USER_TABLE || 'User';
+const ORGANISATION_TABLE = process.env.ORGANISATION_TABLE || 'Organisation';
 
 
 const app: Express = express();
@@ -207,6 +208,24 @@ app.post("/api/auth/login", async (req: Request, res: Response) => {
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+// Organisation lookup
+app.get("/api/organisations/:id", async (req: Request, res: Response) => {
+  const { id } = req.params;
+  try {
+    const pool = await getPool();
+    const result = await pool.request()
+      .input("id", sql.NVarChar(50), id)
+      .query(`SELECT id, name, address, phoneNo, contactPerson, hid FROM [${ORGANISATION_TABLE}] WHERE id = @id`);
+    if (!result.recordset.length) {
+      return res.status(404).json({ success: false, error: "Organisation not found" });
+    }
+    return res.status(200).json({ success: true, data: result.recordset[0] });
+  } catch (err) {
+    console.error("[ORGANISATIONS GET/:id] Error:", err);
+    return res.status(500).json({ success: false, error: "Failed to fetch organisation" });
   }
 });
 
