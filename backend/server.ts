@@ -16,6 +16,7 @@ import {
   getCallStatusMeta,
   isValidCallStatus,
   withCallStatusFields,
+  withCallTypeFields,
 } from "./constants";
 
 dotenv.config();
@@ -425,7 +426,7 @@ app.get("/api/calls/active", async (req: Request, res: Response) => {
     const pool = await getPool();
     const request = pool.request();
     let query =
-      `SELECT cs.[id], cs.[roomId], cs.[currentStatus], cs.[dateTime], cs.[isMuted], cs.[dateTimeReset], r.[roomName]
+      `SELECT cs.[id], cs.[roomId], cs.[currentStatus], cs.[callType], cs.[dateTime], cs.[isMuted], cs.[dateTimeReset], r.[roomName]
        FROM [CallStatus] cs
        LEFT JOIN [Room] r ON cs.[roomId] = r.[id]
        WHERE cs.[currentStatus] <> 0`;
@@ -437,16 +438,17 @@ app.get("/api/calls/active", async (req: Request, res: Response) => {
     const result = await request.query(query);
     const now = Date.now();
     const calls = result.recordset.map((row: any) =>
-      withCallStatusFields({
+      withCallTypeFields(withCallStatusFields({
         id: row.id,
         roomId: row.roomId,
         roomName: row.roomName || '',
         status: row.currentStatus,
+        callType: row.callType ?? row.currentStatus,
         timestamp: row.dateTime,
         minutesAgo: row.dateTime ? Math.floor((now - new Date(row.dateTime).getTime()) / 60000) : null,
         muted: row.isMuted === 1 || row.isMuted === true,
         dateTimeReset: row.dateTimeReset,
-      })
+      }))
     );
     res.status(200).json({
       success: true,
@@ -488,13 +490,14 @@ app.post("/api/calls", async (req: Request, res: Response) => {
     insertReq.input("id", sql.NVarChar(50), callId);
     insertReq.input("roomId", sql.NVarChar(50), roomId);
     insertReq.input("currentStatus", sql.Int, currentStatus);
+    insertReq.input("callType", sql.Int, currentStatus);
     insertReq.input("dateTime", sql.DateTime, now);
     insertReq.input("isMuted", sql.Int, 0);
     insertReq.input("mutedDateTime", sql.DateTime, null);
     insertReq.input("dateTimeReset", sql.DateTime, null);
     await insertReq.query(
-      `INSERT INTO [CallStatus] (id, roomId, currentStatus, dateTime, isMuted, mutedDateTime, dateTimeReset)
-       VALUES (@id, @roomId, @currentStatus, @dateTime, @isMuted, @mutedDateTime, @dateTimeReset)`
+      `INSERT INTO [CallStatus] (id, roomId, currentStatus, callType, dateTime, isMuted, mutedDateTime, dateTimeReset)
+       VALUES (@id, @roomId, @currentStatus, @callType, @dateTime, @isMuted, @mutedDateTime, @dateTimeReset)`
     );
 
     const roomInfo = await pool.request()
@@ -502,17 +505,18 @@ app.post("/api/calls", async (req: Request, res: Response) => {
       .query(`SELECT roomName FROM [Room] WHERE id = @id`);
     const roomName = roomInfo.recordset.length ? roomInfo.recordset[0].roomName : '';
 
-    const newCall = withCallStatusFields({
+    const newCall = withCallTypeFields(withCallStatusFields({
       id: callId,
       roomId,
       roomName,
       status: currentStatus,
+      callType: currentStatus,
       timestamp: now,
       minutesAgo: 0,
       muted: false,
       dateTimeReset: null,
       organisationId
-    });
+    }));
 
     io.to(`org_${organisationId}`).emit("call:new", newCall);
     return res.status(201).json({ success: true, data: newCall });
@@ -553,25 +557,26 @@ app.put("/api/calls/:id", async (req: Request, res: Response) => {
 
     // Fetch updated call
     const result = await pool.request().input('id', sql.NVarChar(50), id).query(
-      `SELECT cs.[id], cs.[roomId], cs.[currentStatus], cs.[dateTime], cs.[isMuted], cs.[mutedDateTime], cs.[dateTimeReset], r.[roomName]
+      `SELECT cs.[id], cs.[roomId], cs.[currentStatus], cs.[callType], cs.[dateTime], cs.[isMuted], cs.[mutedDateTime], cs.[dateTimeReset], r.[roomName]
        FROM [CallStatus] cs
        LEFT JOIN [Room] r ON cs.[roomId] = r.[id]
        WHERE cs.[id] = @id`
     );
     const row = result.recordset[0];
     const call = row
-      ? withCallStatusFields({
+      ? withCallTypeFields(withCallStatusFields({
           id: row.id,
           roomId: row.roomId,
           roomName: row.roomName || '',
           status: row.currentStatus,
+          callType: row.callType ?? row.currentStatus,
           timestamp: row.dateTime,
           minutesAgo: row.dateTime ? Math.floor((Date.now() - new Date(row.dateTime).getTime()) / 60000) : null,
           muted: row.isMuted === 1 || row.isMuted === true,
           mutedDateTime: row.mutedDateTime,
           dateTimeReset: row.dateTimeReset,
           organisationId
-        })
+        }))
       : null;
 
     // Broadcast to org room
@@ -592,7 +597,7 @@ app.get("/api/calls/history", async (req: Request, res: Response) => {
     const pool = await getPool();
     const repeatEnabled = await hasCallRepeatTable(pool);
     let query =
-      `SELECT cs.[id], cs.[roomId], cs.[currentStatus], cs.[dateTime], cs.[isMuted], cs.[mutedDateTime], cs.[dateTimeReset], r.[roomName], r.[departmentType], r.[roomType], r.[floor]${
+      `SELECT cs.[id], cs.[roomId], cs.[currentStatus], cs.[callType], cs.[dateTime], cs.[isMuted], cs.[mutedDateTime], cs.[dateTimeReset], r.[roomName], r.[departmentType], r.[roomType], r.[floor]${
         repeatEnabled
           ? `, ISNULL(cr.[repeatCount], 0) AS [repeatCount], cr.[lastRepeatAt] AS [lastRepeatAt]`
           : `, 0 AS [repeatCount], NULL AS [lastRepeatAt]`
@@ -623,8 +628,15 @@ app.get("/api/calls/history", async (req: Request, res: Response) => {
       params.push({ name: 'search', type: sql.NVarChar, value: `%${search}%` });
     }
     if (status) {
-      where.push('cs.[currentStatus] = @status');
-      params.push({ name: 'status', type: sql.Int, value: Number(status) });
+      const statusStr = String(status).toLowerCase();
+      if (statusStr === "active") {
+        where.push("cs.[currentStatus] <> 0");
+      } else if (statusStr === "resolved" || statusStr === "0") {
+        where.push("cs.[currentStatus] = 0");
+      } else {
+        where.push("cs.[currentStatus] = @status");
+        params.push({ name: "status", type: sql.Int, value: Number(status) });
+      }
     }
     if (room) {
       where.push('cs.[roomId] = @room');
@@ -656,11 +668,13 @@ app.get("/api/calls/history", async (req: Request, res: Response) => {
     query += ` OFFSET ${(Number(page) - 1) * Number(pageSize)} ROWS FETCH NEXT ${Number(pageSize)} ROWS ONLY`;
     const result = await reqDb.query(query);
     const calls = result.recordset.map((row: any) =>
-      withCallStatusFields({
+      withCallTypeFields(withCallStatusFields({
         id: row.id,
         roomId: row.roomId,
         roomName: row.roomName || '',
         status: row.currentStatus,
+        isActive: row.currentStatus !== 0,
+        callType: row.callType ?? (row.currentStatus >= 1 && row.currentStatus <= 4 ? row.currentStatus : null),
         timestamp: row.dateTime,
         muted: row.isMuted === 1 || row.isMuted === true,
         mutedDateTime: row.mutedDateTime,
@@ -674,7 +688,7 @@ app.get("/api/calls/history", async (req: Request, res: Response) => {
           row.lastRepeatAt && row.dateTime
             ? Math.max(0, Math.floor((new Date(row.lastRepeatAt).getTime() - new Date(row.dateTime).getTime()) / 60000))
             : null,
-      })
+      }))
     );
     res.status(200).json({
       success: true,
@@ -729,7 +743,7 @@ async function processCallStatusForRoom(
   const roomId = roomResult.recordset[0].id;
   const activeCallResult = await pool.request()
     .input('roomId', sql.NVarChar(50), roomId)
-    .query(`SELECT TOP 1 id, currentStatus, dateTime, isMuted, dateTimeReset FROM [CallStatus] WHERE roomId = @roomId AND currentStatus <> 0 ORDER BY dateTime DESC`);
+    .query(`SELECT TOP 1 id, currentStatus, callType, dateTime, isMuted, dateTimeReset FROM [CallStatus] WHERE roomId = @roomId AND currentStatus <> 0 ORDER BY dateTime DESC`);
   if (activeCallResult.recordset.length > 0 && isActivate) {
     const existing = activeCallResult.recordset[0];
 
@@ -749,16 +763,17 @@ async function processCallStatusForRoom(
     const roomInfo = await pool.request().input('id', sql.NVarChar(50), roomId).query(`SELECT roomName FROM [Room] WHERE id = @id`);
     const roomName = roomInfo.recordset.length ? roomInfo.recordset[0].roomName : '';
 
-    io.to(`org_${orgId}`).emit("call:new", withCallStatusFields({
+    io.to(`org_${orgId}`).emit("call:new", withCallTypeFields(withCallStatusFields({
       id: existing.id,
       roomId,
       roomName,
       status: existing.currentStatus,
+      callType: existing.callType ?? existing.currentStatus,
       timestamp: existing.dateTime || new Date(),
       muted: existing.isMuted === 1 || existing.isMuted === true,
       dateTimeReset: existing.dateTimeReset,
       minutesAgo: 0
-    }));
+    })));
 
     return {
       httpStatus: 200,
@@ -788,26 +803,28 @@ async function processCallStatusForRoom(
   insertReq.input("id", sql.NVarChar(50), callId);
   insertReq.input("roomId", sql.NVarChar(50), roomId);
   insertReq.input("currentStatus", sql.Int, statusNumber);
+  insertReq.input("callType", sql.Int, statusNumber);
   const now = new Date();
   insertReq.input("dateTime", sql.DateTime, now);
   insertReq.input("isMuted", sql.Int, 0);
   insertReq.input("mutedDateTime", sql.DateTime, null);
   if (isActivate) { insertReq.input("dateTimeReset", sql.DateTime, null); }
   else { insertReq.input("dateTimeReset", sql.DateTime, now); }
-  const insertQuery = `INSERT INTO [CallStatus] (id, roomId, currentStatus, dateTime, isMuted, mutedDateTime, dateTimeReset) VALUES (@id, @roomId, @currentStatus, @dateTime, @isMuted, @mutedDateTime, @dateTimeReset)`;
+  const insertQuery = `INSERT INTO [CallStatus] (id, roomId, currentStatus, callType, dateTime, isMuted, mutedDateTime, dateTimeReset) VALUES (@id, @roomId, @currentStatus, @callType, @dateTime, @isMuted, @mutedDateTime, @dateTimeReset)`;
   await insertReq.query(insertQuery);
   const roomInfo = await pool.request().input('id', sql.NVarChar(50), roomId).query(`SELECT roomName FROM [Room] WHERE id = @id`);
   const roomName = roomInfo.recordset.length ? roomInfo.recordset[0].roomName : '';
-  io.to(`org_${orgId}`).emit("call:new", withCallStatusFields({
+  io.to(`org_${orgId}`).emit("call:new", withCallTypeFields(withCallStatusFields({
     id: callId,
     roomId,
     roomName,
     status: statusNumber,
+    callType: statusNumber,
     timestamp: now,
     muted: false,
     dateTimeReset: isActivate ? null : now,
     minutesAgo: 0
-  }));
+  })));
   return { httpStatus: 200, result: "SUCCESS", message: `Room ${dnum}: new call inserted (status ${statusNumber})` };
 }
 

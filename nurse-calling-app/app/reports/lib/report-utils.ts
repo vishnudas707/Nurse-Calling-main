@@ -29,6 +29,15 @@ export function toDayKey(value: unknown) {
   return `${y}-${m}-${day}`;
 }
 
+export function isCallActive(call: CallRecord): boolean {
+  if (call?.isActive !== undefined) return Boolean(call.isActive);
+  return Number(call?.status) !== 0;
+}
+
+export function getCallStateLabel(call: CallRecord): "Active" | "Resolved" {
+  return isCallActive(call) ? "Active" : "Resolved";
+}
+
 export function getLagMinutes(call: CallRecord) {
   if (!call?.timestamp || !call?.dateTimeReset) return null;
   const start = new Date(call.timestamp).getTime();

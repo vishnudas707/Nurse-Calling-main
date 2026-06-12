@@ -50,3 +50,19 @@ export const withCallStatusFields = <T extends { status: number }>(call: T) => {
   const { label, color } = getCallStatusMeta(call.status);
   return { ...call, statusLabel: label, color };
 };
+
+/** Call type stored in CallStatus.callType (1–4 only; 0 = reset has no type) */
+export const CALL_TYPE_MAP: Record<number, string> = {
+  1: "Normal",
+  2: "Emergency",
+  3: "Code Blue",
+  4: "Toilet",
+};
+
+export const getCallTypeName = (callType: number): string =>
+  CALL_TYPE_MAP[callType] ?? `Unknown (${callType})`;
+
+export const withCallTypeFields = <T extends { callType?: number | null }>(call: T) => ({
+  ...call,
+  callTypeLabel: call.callType != null ? getCallTypeName(call.callType) : "",
+});

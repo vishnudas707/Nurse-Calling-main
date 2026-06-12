@@ -61,8 +61,8 @@ export default function ReportFilters({
         />
         <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="min-w-[140px] flex-1">
           <option value="">All Statuses</option>
-          <option value="1">Active</option>
-          <option value="0">Resolved</option>
+          <option value="active">Active</option>
+          <option value="resolved">Resolved</option>
         </Select>
         <Select value={mutedFilter} onChange={(e) => setMutedFilter(e.target.value)} className="min-w-[120px] flex-1">
           <option value="">All</option>

@@ -43,3 +43,20 @@ export const getDepartmentTypeOptions = () => {
     label: value,
   }));
 };
+
+/** Call type: 1 = Normal, 2 = Emergency, 3 = Code Blue, 4 = Toilet */
+export const CALL_TYPE_MAP: Record<number, string> = {
+  1: "Normal",
+  2: "Emergency",
+  3: "Code Blue",
+  4: "Toilet",
+};
+
+export const getCallTypeName = (callType: number): string =>
+  CALL_TYPE_MAP[callType] ?? `Unknown (${callType})`;
+
+export const getCallTypeOptions = () =>
+  Object.entries(CALL_TYPE_MAP).map(([key, value]) => ({
+    value: key,
+    label: value,
+  }));

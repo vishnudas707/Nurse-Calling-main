@@ -6,12 +6,12 @@ import TopNavBar from "../components/navbar";
 import { Card, Pagination, Select, TextInput, Spinner } from "flowbite-react";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { getDepartmentTypeName } from "../lib/constants";
+import { getDepartmentTypeName, getCallTypeName } from "../lib/constants";
 import { saveAs } from "file-saver";
 import * as XLSX from "xlsx";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-import { callsHistoryUrl, roomsApiUrl } from "./lib/report-utils";
+import { callsHistoryUrl, roomsApiUrl, getCallStateLabel, isCallActive } from "./lib/report-utils";
 
 export default function ReportsPage() {
   const [calls, setCalls] = useState<any[]>([]);
@@ -67,18 +67,20 @@ export default function ReportsPage() {
 
   const paginatedCalls = calls;
 
+  const getCallTypeDisplay = (call: { callType?: number | null; callTypeLabel?: string; status?: number }) => {
+    if (call.callTypeLabel) return call.callTypeLabel;
+    if (call.callType != null) return getCallTypeName(call.callType);
+    if (call.status != null && call.status >= 1 && call.status <= 4) return getCallTypeName(call.status);
+    return "";
+  };
+
   const exportExcel = () => {
     const ws = XLSX.utils.json_to_sheet(calls.map(call => ({
       "Room": call.roomName,
       "Department": getDepartmentTypeName(Number(call.departmentType)),
       "Floor": call.floor || '',
-      "Status":
-        call.status === 1 ? "Normal" :
-        call.status === 2 ? "Emergency" :
-        call.status === 3 ? "Code Blue" :
-        call.status === 4 ? "Toilet" :
-        call.status === 0 ? "Reset" :
-        call.status,
+      "Call Type": getCallTypeDisplay(call),
+      "Status": getCallStateLabel(call),
       "Muted": call.muted ? "Muted" : "Unmuted",
       "Created": call.timestamp ? new Date(call.timestamp).toLocaleString() : '',
       "Muted At": call.mutedDateTime ? new Date(call.mutedDateTime).toLocaleString() : '',
@@ -98,17 +100,13 @@ export default function ReportsPage() {
     doc.text("Call History Report", 14, 16);
     autoTable(doc, {
       startY: 22,
-      head: [["Room", "Department", "Floor", "Status", "Muted", "Created", "Muted At", "Reset At", "Repeat Count", "Last Repeat At", "Repeat Duration (min)"]],
+      head: [["Room", "Department", "Floor", "Call Type", "Status", "Muted", "Created", "Muted At", "Reset At", "Repeat Count", "Last Repeat At", "Repeat Duration (min)"]],
       body: calls.map(call => [
         call.roomName,
         getDepartmentTypeName(Number(call.departmentType)),
         call.floor || '',
-        call.status === 1 ? "Normal"
-          : call.status === 2 ? "Emergency"
-          : call.status === 3 ? "Code Blue"
-          : call.status === 4 ? "Toilet"
-          : call.status === 0 ? "Reset"
-          : call.status,
+        getCallTypeDisplay(call),
+        getCallStateLabel(call),
         call.muted ? "Muted" : "Unmuted",
         call.timestamp ? new Date(call.timestamp).toLocaleString() : '',
         call.mutedDateTime ? new Date(call.mutedDateTime).toLocaleString() : '',
@@ -136,8 +134,8 @@ export default function ReportsPage() {
               />
               <Select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="min-w-[140px] flex-1">
                 <option value="">All Statuses</option>
-                <option value="1">Active</option>
-                <option value="0">Resolved</option>
+                <option value="active">Active</option>
+                <option value="resolved">Resolved</option>
               </Select>
               <Select value={mutedFilter} onChange={e => setMutedFilter(e.target.value)} className="min-w-[120px] flex-1">
                 <option value="">All</option>
@@ -202,6 +200,7 @@ export default function ReportsPage() {
                       <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Room</th>
                       <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Department</th>
                       <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Floor</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Call Type</th>
                       <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Status</th>
                       <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Muted</th>
                       <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Created</th>
@@ -221,7 +220,22 @@ export default function ReportsPage() {
                         </td>
                         <td className="px-4 py-2 whitespace-nowrap">{call.floor || ''}</td>
                         <td className="px-4 py-2 whitespace-nowrap">
-                          {call.status === 1 ? <span className="text-green-700 font-bold">Active</span> : call.status === 0 ? <span className="text-gray-700 font-bold">Resolved</span> : call.status}
+                          {(() => {
+                            const typeNum = call.callType ?? (call.status >= 1 && call.status <= 4 ? call.status : null);
+                            return (
+                              <span className={`px-2 py-1 rounded text-xs font-semibold ${
+                                typeNum === 2 || typeNum === 4 ? "bg-red-200 text-red-800"
+                                : typeNum === 3 ? "bg-blue-200 text-blue-800"
+                                : typeNum === 1 ? "bg-green-200 text-green-800"
+                                : "bg-gray-200 text-gray-800"
+                              }`}>{getCallTypeDisplay(call)}</span>
+                            );
+                          })()}
+                        </td>
+                        <td className="px-4 py-2 whitespace-nowrap">
+                          {isCallActive(call)
+                            ? <span className="text-green-700 font-bold">Active</span>
+                            : <span className="text-gray-700 font-bold">Resolved</span>}
                         </td>
                         <td className="px-4 py-2 whitespace-nowrap">{call.muted ? 'Muted' : 'Unmuted'}</td>
                         <td className="px-4 py-2 whitespace-nowrap">{call.timestamp ? new Date(call.timestamp).toLocaleString() : ''}</td>
