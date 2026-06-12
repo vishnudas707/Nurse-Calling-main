@@ -5,12 +5,15 @@
 import TopNavBar from "../components/navbar";
 import { Card } from "flowbite-react";
 import { getOrganisationId } from "../lib/auth";
+import { getCallTypeName } from "../lib/constants";
+import { getCallStateLabel, isCallActive } from "../reports/lib/report-utils";
 
 import { useEffect, useState } from "react";
 import { io, Socket } from "socket.io-client";
 
   function DashboardPage() {
     const [recentHistory, setRecentHistory] = useState<any[]>([]);
+    const [todayHistory, setTodayHistory] = useState<any[]>([]);
     const [activeCalls, setActiveCalls] = useState<any[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState("");
@@ -19,7 +22,13 @@ import { io, Socket } from "socket.io-client";
     const [organisationName, setOrganisationName] = useState<string | null>(null);
     const [, forceTimeTick] = useState(0);
 
-    function getCallTheme(status: unknown, muted: unknown) {
+    function getCallTypeNum(call: { callType?: number | null; status?: number }) {
+      if (call.callType != null) return call.callType;
+      if (call.status != null && call.status >= 1 && call.status <= 4) return call.status;
+      return 1;
+    }
+
+    function getCallTheme(callType: unknown, muted: unknown) {
       if (muted === true) {
         return {
           bg: "bg-gray-200 dark:bg-gray-700",
@@ -30,7 +39,8 @@ import { io, Socket } from "socket.io-client";
         };
       }
 
-      if (status === 2) {
+      const type = Number(callType);
+      if (type === 2) {
         return {
           bg: "bg-red-100 dark:bg-red-900",
           title: "text-red-800 dark:text-red-100",
@@ -40,7 +50,7 @@ import { io, Socket } from "socket.io-client";
         };
       }
 
-      if (status === 4) {
+      if (type === 4) {
         return {
           bg: "bg-red-100 dark:bg-red-900",
           title: "text-red-800 dark:text-red-100",
@@ -50,7 +60,7 @@ import { io, Socket } from "socket.io-client";
         };
       }
 
-      if (status === 3) {
+      if (type === 3) {
         return {
           bg: "bg-blue-100 dark:bg-blue-900",
           title: "text-blue-800 dark:text-blue-100",
@@ -104,17 +114,13 @@ import { io, Socket } from "socket.io-client";
     const now = new Date();
     const todayStr = now.toISOString().slice(0, 10);
     const totalCalls = activeCalls.length;
-    const pendingCalls = activeCalls.filter(c => c.status === 'Pending' || c.status === 2).length;
-    const resolvedToday = activeCalls.filter(c => {
-      if (!c.status || !c.timestamp) return false;
-      if (c.status === 'Resolved' || c.status === 0) {
-        const date = new Date(c.timestamp).toISOString().slice(0, 10);
-        return date === todayStr;
-      }
-      return false;
+    const pendingCalls = activeCalls.filter(c => !c.muted).length;
+    const resolvedToday = todayHistory.filter(c => {
+      if (isCallActive(c) || !c.dateTimeReset) return false;
+      return new Date(c.dateTimeReset).toISOString().slice(0, 10) === todayStr;
     }).length;
-    // Average response time for resolved calls today (in minutes)
-    const responseTimes = activeCalls.filter(c => (c.status === 'Resolved' || c.status === 0) && c.timestamp && c.dateTimeReset)
+    const responseTimes = todayHistory
+      .filter(c => !isCallActive(c) && c.timestamp && c.dateTimeReset)
       .map(c => (new Date(c.dateTimeReset).getTime() - new Date(c.timestamp).getTime()) / 60000)
       .filter(mins => mins >= 0);
     const avgResponseTime = responseTimes.length ? (responseTimes.reduce((a, b) => a + b, 0) / responseTimes.length).toFixed(1) + ' min' : '-';
@@ -201,7 +207,9 @@ import { io, Socket } from "socket.io-client";
       };
       fetchActiveCalls();
   
-      // Fetch recent history (last 5 calls)
+      const todayStart = `${todayStr}T00:00:00`;
+      const todayEnd = `${todayStr}T23:59:59`;
+
       const fetchRecentHistory = async () => {
         try {
           const resp = await fetch(
@@ -212,15 +220,31 @@ import { io, Socket } from "socket.io-client";
             setRecentHistory(data.data.slice(0, 5));
           }
         } catch (err) {
-          // Optionally log error
           console.error("Error fetching recent history", err);
         }
       };
+
+      const fetchTodayHistory = async () => {
+        try {
+          const resp = await fetch(
+            `${API_BASE}/api/calls/history${orgQuery ? orgQuery + "&" : "?"}startDate=${encodeURIComponent(todayStart)}&endDate=${encodeURIComponent(todayEnd)}&page=1&pageSize=10000`
+          );
+          const data = await resp.json();
+          if (resp.ok && data.success) {
+            setTodayHistory(data.data || []);
+          }
+        } catch (err) {
+          console.error("Error fetching today history", err);
+        }
+      };
+
       fetchRecentHistory();
+      fetchTodayHistory();
   
       const refreshIntervalId = window.setInterval(() => {
         fetchActiveCalls();
         fetchRecentHistory();
+        fetchTodayHistory();
       }, 5 * 60 * 1000);
   
       // Setup socket.io client
@@ -266,7 +290,7 @@ import { io, Socket } from "socket.io-client";
             // Remove card when status is reset
             setActiveCalls((prev) => prev.filter((c) => c.id !== id));
           } else {
-            setActiveCalls((prev) => prev.map((c) => c.id === id ? { ...c, status } : c));
+            setActiveCalls((prev) => prev.map((c) => c.id === id ? { ...c, status, callType: c.callType ?? status } : c));
           }
         } catch (err) {
           console.error("Error handling call:status", err);
@@ -327,7 +351,7 @@ import { io, Socket } from "socket.io-client";
               ) : (
                 activeCalls.map((call) => (
                   (() => {
-                    const theme = getCallTheme(call.status, call.muted);
+                    const theme = getCallTheme(getCallTypeNum(call), call.muted);
                     return (
                   <div
                     key={call.id || call.roomId}
@@ -443,25 +467,32 @@ import { io, Socket } from "socket.io-client";
                             {Math.floor((new Date().getTime() - new Date(item.timestamp).getTime()) / (1000 * 60))} minutes ago
                           </p>
                         </div>
-                        <div className="text-right">
+                        <div className="text-right space-y-1">
+                          {(() => {
+                            const typeNum = getCallTypeNum(item);
+                            return (
+                              <span
+                                className={`inline-block rounded-full px-3 py-1 text-xs font-semibold ${
+                                  typeNum === 2 || typeNum === 4 ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
+                                  : typeNum === 3 ? "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
+                                  : typeNum === 1 ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
+                                  : "bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200"
+                                }`}
+                              >
+                                {item.callTypeLabel || getCallTypeName(typeNum)}
+                              </span>
+                            );
+                          })()}
                           <span
                             className={`inline-block rounded-full px-3 py-1 text-xs font-semibold ${
-                              item.status === 1 ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
-                                : item.status === 2 ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
-                                : item.status === 3 ? "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
-                                : item.status === 4 ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
-                                : item.status === 0 ? "bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200"
-                                : "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200"
+                              isCallActive(item)
+                                ? "bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-300"
+                                : "bg-gray-100 text-gray-700 dark:bg-gray-900 dark:text-gray-300"
                             }`}
                           >
-                            {item.status === 1 ? "Normal"
-                              : item.status === 2 ? "Emergency"
-                              : item.status === 3 ? "Code Blue"
-                              : item.status === 4 ? "Toilet"
-                              : item.status === 0 ? "Reset"
-                              : item.status}
+                            {getCallStateLabel(item)}
                           </span>
-                          <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">
+                          <p className="text-xs text-gray-600 dark:text-gray-400">
                             {item.timestamp ? new Date(item.timestamp).toLocaleString() : ''}
                           </p>
                         </div>
