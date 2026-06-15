@@ -8,19 +8,64 @@ import { getOrganisationId } from "../lib/auth";
 import { getCallTypeName } from "../lib/constants";
 import { getCallStateLabel, isCallActive } from "../reports/lib/report-utils";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { io, Socket } from "socket.io-client";
+
+function clearedCallsStorageKey(orgId: string | null) {
+  return orgId ? `dashboard_cleared_calls_${orgId}` : "dashboard_cleared_calls";
+}
+
+function loadClearedCallIds(orgId: string | null): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const raw = localStorage.getItem(clearedCallsStorageKey(orgId));
+    return new Set(raw ? (JSON.parse(raw) as string[]) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveClearedCallIds(orgId: string | null, ids: Set<string>) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(clearedCallsStorageKey(orgId), JSON.stringify([...ids]));
+}
 
   function DashboardPage() {
     const [recentHistory, setRecentHistory] = useState<any[]>([]);
     const [todayHistory, setTodayHistory] = useState<any[]>([]);
     const [activeCalls, setActiveCalls] = useState<any[]>([]);
+    const [clearedCallIds, setClearedCallIds] = useState<Set<string>>(() => new Set());
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState("");
     const [socket, setSocket] = useState<Socket | null>(null);
     const [organisationId, setOrganisationId] = useState<string | null>(null);
     const [organisationName, setOrganisationName] = useState<string | null>(null);
     const [, forceTimeTick] = useState(0);
+
+    const clearCallFromDashboard = useCallback((callId: string) => {
+      setClearedCallIds((prev) => {
+        const next = new Set(prev);
+        next.add(callId);
+        saveClearedCallIds(organisationId, next);
+        return next;
+      });
+    }, [organisationId]);
+
+    const clearAllVisibleCalls = useCallback(() => {
+      setClearedCallIds((prev) => {
+        const next = new Set(prev);
+        for (const call of activeCalls) {
+          if (call.id && !prev.has(call.id)) next.add(call.id);
+        }
+        saveClearedCallIds(organisationId, next);
+        return next;
+      });
+    }, [activeCalls, organisationId]);
+
+    const visibleActiveCalls = useMemo(
+      () => activeCalls.filter((call) => call.id && !clearedCallIds.has(call.id)),
+      [activeCalls, clearedCallIds]
+    );
 
     function getCallTypeNum(call: { callType?: number | null; status?: number }) {
       if (call.callType != null) return call.callType;
@@ -113,8 +158,8 @@ import { io, Socket } from "socket.io-client";
     // Dynamic stats
     const now = new Date();
     const todayStr = now.toISOString().slice(0, 10);
-    const totalCalls = activeCalls.length;
-    const pendingCalls = activeCalls.filter(c => !c.muted).length;
+    const totalCalls = visibleActiveCalls.length;
+    const pendingCalls = visibleActiveCalls.filter(c => !c.muted).length;
     const resolvedToday = todayHistory.filter(c => {
       if (isCallActive(c) || !c.dateTimeReset) return false;
       return new Date(c.dateTimeReset).toISOString().slice(0, 10) === todayStr;
@@ -172,6 +217,7 @@ import { io, Socket } from "socket.io-client";
 
       const orgId = getOrganisationId();
       setOrganisationId(orgId);
+      setClearedCallIds(loadClearedCallIds(orgId));
       const orgQuery = orgId ? `?organisationId=${encodeURIComponent(orgId)}` : "";
 
       const fetchOrganisationName = async () => {
@@ -287,7 +333,14 @@ import { io, Socket } from "socket.io-client";
         try {
           console.log('[SocketIO] Received call:status', { id, status });
           if (status === 0) {
-            // Remove card when status is reset
+            // Remove card when status is reset; also drop from cleared list
+            setClearedCallIds((prev) => {
+              if (!prev.has(id)) return prev;
+              const next = new Set(prev);
+              next.delete(id);
+              saveClearedCallIds(orgId, next);
+              return next;
+            });
             setActiveCalls((prev) => prev.filter((c) => c.id !== id));
           } else {
             setActiveCalls((prev) => prev.map((c) => c.id === id ? { ...c, status, callType: c.callType ?? status } : c));
@@ -323,20 +376,31 @@ import { io, Socket } from "socket.io-client";
 
           {/* Active Calls Section - Moved to Top */}
           <div className="mb-12">
-            <div className="mb-6">
-              <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
-                Active Calls
-              </h2>
-              {organisationId && (
-                <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
-                  Organisation:{" "}
-                  <span className="font-medium">
-                    {organisationName || organisationId}
-                  </span>
-                  {organisationName && (
-                    <span className="text-gray-500 dark:text-gray-500"> ({organisationId})</span>
-                  )}
-                </p>
+            <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
+                  Active Calls
+                </h2>
+                {organisationId && (
+                  <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+                    Organisation:{" "}
+                    <span className="font-medium">
+                      {organisationName || organisationId}
+                    </span>
+                    {organisationName && (
+                      <span className="text-gray-500 dark:text-gray-500"> ({organisationId})</span>
+                    )}
+                  </p>
+                )}
+              </div>
+              {!isLoading && !error && visibleActiveCalls.length > 0 && (
+                <button
+                  type="button"
+                  onClick={clearAllVisibleCalls}
+                  className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                >
+                  Clear All
+                </button>
               )}
             </div>
 
@@ -346,10 +410,10 @@ import { io, Socket } from "socket.io-client";
                 <div className="col-span-6 text-center text-gray-600 dark:text-gray-300 py-8">Loading active calls...</div>
               ) : error ? (
                 <div className="col-span-6 text-center text-red-600 dark:text-red-300 py-8">{error}</div>
-              ) : activeCalls.length === 0 ? (
+              ) : visibleActiveCalls.length === 0 ? (
                 <div className="col-span-6 text-center text-gray-600 dark:text-gray-300 py-8">No active calls</div>
               ) : (
-                activeCalls.map((call) => (
+                visibleActiveCalls.map((call) => (
                   (() => {
                     const theme = getCallTheme(getCallTypeNum(call), call.muted);
                     return (
@@ -405,6 +469,14 @@ import { io, Socket } from "socket.io-client";
                         </button>
                       </div>
                     )}
+                    <button
+                      type="button"
+                      className="mt-2 rounded px-2 py-1 text-xs font-medium border border-gray-400 bg-white text-gray-700 hover:bg-gray-100 dark:border-gray-500 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                      onClick={() => clearCallFromDashboard(call.id)}
+                      title="Hide from dashboard only (does not reset the call)"
+                    >
+                      Clear
+                    </button>
                   </div>
                     );
                   })()
