@@ -13,6 +13,14 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { callsHistoryUrl, roomsApiUrl, getCallStateLabel, isCallActive } from "./lib/report-utils";
 
+const PAGE_SIZE_ALL = 100000;
+const PAGE_SIZE_OPTIONS = [
+  { label: "10", value: "10" },
+  { label: "100", value: "100" },
+  { label: "500", value: "500" },
+  { label: "All", value: "all" },
+] as const;
+
 export default function ReportsPage() {
   const [calls, setCalls] = useState<any[]>([]);
   const [rooms, setRooms] = useState<any[]>([]);
@@ -26,8 +34,11 @@ export default function ReportsPage() {
   const [endDate, setEndDate] = useState("");
 
   const [page, setPage] = useState(1);
-  const pageSize = 10;
+  const [pageSizeOption, setPageSizeOption] = useState("10");
   const [totalPages, setTotalPages] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+
+  const apiPageSize = pageSizeOption === "all" ? PAGE_SIZE_ALL : Number(pageSizeOption);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -42,7 +53,7 @@ export default function ReportsPage() {
         if (roomFilter) params.push(`room=${encodeURIComponent(roomFilter)}`);
         if (mutedFilter) params.push(`muted=${encodeURIComponent(mutedFilter)}`);
         params.push(`page=${page}`);
-        params.push(`pageSize=${pageSize}`);
+        params.push(`pageSize=${apiPageSize}`);
         const [callsResp, roomsResp] = await Promise.all([
           fetch(callsHistoryUrl(params.join("&"))),
           fetch(roomsApiUrl()),
@@ -53,6 +64,7 @@ export default function ReportsPage() {
           setCalls(callsData.data || []);
           setRooms(roomsData.data || []);
           setTotalPages(callsData.totalPages || 1);
+          setTotalCount(callsData.totalCount ?? (callsData.data?.length || 0));
         } else {
           setError("Failed to fetch data");
         }
@@ -63,9 +75,17 @@ export default function ReportsPage() {
       }
     };
     fetchData();
-  }, [startDate, endDate, search, statusFilter, roomFilter, mutedFilter, page]);
+  }, [startDate, endDate, search, statusFilter, roomFilter, mutedFilter, page, pageSizeOption, apiPageSize]);
 
   const paginatedCalls = calls;
+  const rangeStart = totalCount === 0 ? 0 : (page - 1) * apiPageSize + 1;
+  const rangeEnd = Math.min(page * apiPageSize, totalCount);
+  const showPagination = pageSizeOption !== "all" && totalPages > 1;
+
+  const handlePageSizeChange = (value: string) => {
+    setPageSizeOption(value);
+    setPage(1);
+  };
 
   const getCallTypeDisplay = (call: { callType?: number | null; callTypeLabel?: string; status?: number }) => {
     if (call.callTypeLabel) return call.callTypeLabel;
@@ -185,7 +205,35 @@ export default function ReportsPage() {
           </Card>
 
           <Card className="dark:bg-gray-800">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4 px-1">Call History</h2>
+            <div className="flex flex-col gap-4 mb-4 px-1 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Call History</h2>
+                {!isLoading && !error && (
+                  <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                    {totalCount === 0
+                      ? "No records"
+                      : `Showing ${rangeStart}–${rangeEnd} of ${totalCount}`}
+                  </p>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <label htmlFor="rows-per-page" className="text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap">
+                  Rows per page:
+                </label>
+                <Select
+                  id="rows-per-page"
+                  value={pageSizeOption}
+                  onChange={(e) => handlePageSizeChange(e.target.value)}
+                  className="min-w-[100px]"
+                  disabled={isLoading}
+                >
+                  {PAGE_SIZE_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </Select>
+              </div>
+            </div>
+
             {isLoading ? (
               <div className="flex justify-center items-center h-64"><Spinner size="xl" /></div>
             ) : error ? (
@@ -193,27 +241,29 @@ export default function ReportsPage() {
             ) : paginatedCalls.length === 0 ? (
               <div className="text-center text-gray-600 dark:text-gray-300 py-8">No call history found</div>
             ) : (
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
                 <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                  <thead className="bg-gray-50 dark:bg-gray-700">
+                  <thead className="bg-gray-50 dark:bg-gray-700 sticky top-0">
                     <tr>
-                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Room</th>
-                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Department</th>
-                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Floor</th>
-                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Call Type</th>
-                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Status</th>
-                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Muted</th>
-                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Created</th>
-                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Muted At</th>
-                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Reset At</th>
-                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Repeat Count</th>
-                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Last Repeat At</th>
-                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Repeat Duration (min)</th>
+                      <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">#</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Room</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Department</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Floor</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Call Type</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Status</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Muted</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Created</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Muted At</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Reset At</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Repeat Count</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Last Repeat At</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Repeat Duration (min)</th>
                     </tr>
                   </thead>
                   <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                    {paginatedCalls.map((call) => (
-                      <tr key={call.id}>
+                    {paginatedCalls.map((call, index) => (
+                      <tr key={call.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                        <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{rangeStart + index}</td>
                         <td className="px-4 py-2 whitespace-nowrap">{call.roomName}</td>
                         <td className="px-4 py-2 whitespace-nowrap">
                           <span className={`px-2 py-1 rounded text-xs font-semibold ${getDepartmentTypeName(Number(call.departmentType)) === 'Intensive Care' ? 'bg-red-200 text-red-800' : getDepartmentTypeName(Number(call.departmentType)) === 'General Ward' ? 'bg-blue-200 text-blue-800' : getDepartmentTypeName(Number(call.departmentType)) === 'Emergency' ? 'bg-yellow-200 text-yellow-800' : getDepartmentTypeName(Number(call.departmentType)) === 'Surgery' ? 'bg-green-200 text-green-800' : 'bg-gray-200 text-gray-800'}`}>{getDepartmentTypeName(Number(call.departmentType))}</span>
@@ -248,16 +298,38 @@ export default function ReportsPage() {
                     ))}
                   </tbody>
                 </table>
-                {totalPages > 1 && (
-                  <div className="flex justify-center mt-4">
-                    <Pagination
-                      currentPage={page}
-                      totalPages={totalPages}
-                      onPageChange={setPage}
-                      showIcons
-                    />
+                <div className="flex flex-col gap-3 border-t border-gray-200 bg-gray-50 px-4 py-3 dark:border-gray-700 dark:bg-gray-900 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    {totalCount === 0
+                      ? "No records"
+                      : `Showing ${rangeStart}–${rangeEnd} of ${totalCount}`}
+                  </p>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="flex items-center gap-2">
+                      <label htmlFor="rows-per-page-footer" className="text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap">
+                        Rows per page:
+                      </label>
+                      <Select
+                        id="rows-per-page-footer"
+                        value={pageSizeOption}
+                        onChange={(e) => handlePageSizeChange(e.target.value)}
+                        className="min-w-[100px]"
+                      >
+                        {PAGE_SIZE_OPTIONS.map((opt) => (
+                          <option key={opt.value} value={opt.value}>{opt.label}</option>
+                        ))}
+                      </Select>
+                    </div>
+                    {showPagination && (
+                      <Pagination
+                        currentPage={page}
+                        totalPages={totalPages}
+                        onPageChange={setPage}
+                        showIcons
+                      />
+                    )}
                   </div>
-                )}
+                </div>
               </div>
             )}
           </Card>
