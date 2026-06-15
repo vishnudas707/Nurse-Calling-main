@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { buildHistoryQueryParams, callsHistoryUrl, roomsApiUrl, type CallRecord, type ReportFilterParams } from "../lib/report-utils";
+import { buildHistoryQueryParams, callsHistoryUrl, fetchRoomsCached, type CallRecord, type ReportFilterParams } from "../lib/report-utils";
 
 export function useReportCalls(filters: ReportFilterParams) {
   const [allCalls, setAllCalls] = useState<CallRecord[]>([]);
@@ -12,30 +12,38 @@ export function useReportCalls(filters: ReportFilterParams) {
   const { startDate, endDate, search, statusFilter, roomFilter, mutedFilter } = filters;
 
   useEffect(() => {
+    const ac = new AbortController();
+    fetchRoomsCached(ac.signal)
+      .then(setRooms)
+      .catch((err) => {
+        if (err?.name !== "AbortError") console.error("Failed to load rooms", err);
+      });
+    return () => ac.abort();
+  }, []);
+
+  useEffect(() => {
+    const ac = new AbortController();
     const fetchData = async () => {
       setIsLoading(true);
       setError("");
       try {
         const query = buildHistoryQueryParams(filters);
-        const [callsResp, roomsResp] = await Promise.all([
-          fetch(callsHistoryUrl(query)),
-          fetch(roomsApiUrl()),
-        ]);
+        const callsResp = await fetch(callsHistoryUrl(query), { signal: ac.signal });
         const callsData = await callsResp.json();
-        const roomsData = await roomsResp.json();
-        if (callsResp.ok && callsData.success && roomsResp.ok && roomsData.success) {
+        if (callsResp.ok && callsData.success) {
           setAllCalls(callsData.data || []);
-          setRooms(roomsData.data || []);
         } else {
           setError("Failed to fetch data");
         }
-      } catch {
+      } catch (err: unknown) {
+        if (err instanceof Error && err.name === "AbortError") return;
         setError("Error connecting to server");
       } finally {
         setIsLoading(false);
       }
     };
     fetchData();
+    return () => ac.abort();
   }, [startDate, endDate, search, statusFilter, roomFilter, mutedFilter]);
 
   return { allCalls, rooms, isLoading, error };

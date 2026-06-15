@@ -19,6 +19,50 @@ export function callsHistoryUrl(query: string) {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type CallRecord = any;
 
+type RoomsCacheEntry = { orgKey: string; rooms: CallRecord[]; ts: number };
+let roomsCache: RoomsCacheEntry | null = null;
+const ROOMS_CACHE_MS = 5 * 60 * 1000;
+
+export async function fetchRoomsCached(signal?: AbortSignal): Promise<CallRecord[]> {
+  const orgKey = getOrganisationId() || "";
+  const now = Date.now();
+  if (roomsCache && roomsCache.orgKey === orgKey && now - roomsCache.ts < ROOMS_CACHE_MS) {
+    return roomsCache.rooms;
+  }
+  const resp = await fetch(roomsApiUrl(), { signal });
+  const data = await resp.json();
+  if (!resp.ok || !data.success) {
+    throw new Error("Failed to fetch rooms");
+  }
+  const rooms = data.data || [];
+  roomsCache = { orgKey, rooms, ts: now };
+  return rooms;
+}
+
+export function buildCallsHistoryParams(
+  filters: {
+    startDate?: string;
+    endDate?: string;
+    search?: string;
+    statusFilter?: string;
+    roomFilter?: string;
+    mutedFilter?: string;
+  },
+  page: number,
+  pageSize: number
+) {
+  const params: string[] = [];
+  if (filters.startDate) params.push(`startDate=${encodeURIComponent(filters.startDate)}`);
+  if (filters.endDate) params.push(`endDate=${encodeURIComponent(filters.endDate)}`);
+  if (filters.search) params.push(`search=${encodeURIComponent(filters.search)}`);
+  if (filters.statusFilter) params.push(`status=${encodeURIComponent(filters.statusFilter)}`);
+  if (filters.roomFilter) params.push(`room=${encodeURIComponent(filters.roomFilter)}`);
+  if (filters.mutedFilter) params.push(`muted=${encodeURIComponent(filters.mutedFilter)}`);
+  params.push(`page=${page}`);
+  params.push(`pageSize=${pageSize}`);
+  return params.join("&");
+}
+
 export function toDayKey(value: unknown) {
   if (!value) return "";
   const d = new Date(value as string);

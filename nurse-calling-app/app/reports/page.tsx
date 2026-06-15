@@ -4,14 +4,16 @@
 
 import TopNavBar from "../components/navbar";
 import { Card, Pagination, Select, TextInput, Spinner } from "flowbite-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import Link from "next/link";
 import { getDepartmentTypeName, getCallTypeName } from "../lib/constants";
-import { saveAs } from "file-saver";
-import * as XLSX from "xlsx";
-import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
-import { callsHistoryUrl, roomsApiUrl, getCallStateLabel, isCallActive } from "./lib/report-utils";
+import {
+  callsHistoryUrl,
+  fetchRoomsCached,
+  buildCallsHistoryParams,
+  getCallStateLabel,
+  isCallActive,
+} from "./lib/report-utils";
 
 const PAGE_SIZE_ALL = 100000;
 const PAGE_SIZE_OPTIONS = [
@@ -25,8 +27,10 @@ export default function ReportsPage() {
   const [calls, setCalls] = useState<any[]>([]);
   const [rooms, setRooms] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [roomFilter, setRoomFilter] = useState("");
   const [mutedFilter, setMutedFilter] = useState("");
@@ -39,43 +43,69 @@ export default function ReportsPage() {
   const [totalCount, setTotalCount] = useState(0);
 
   const apiPageSize = pageSizeOption === "all" ? PAGE_SIZE_ALL : Number(pageSizeOption);
+  const hasLoadedOnce = useRef(false);
 
   useEffect(() => {
-    const fetchData = async () => {
-      setIsLoading(true);
+    const timer = window.setTimeout(() => {
+      setDebouncedSearch(search);
+      setPage(1);
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [search]);
+
+  useEffect(() => {
+    const ac = new AbortController();
+    fetchRoomsCached(ac.signal)
+      .then(setRooms)
+      .catch((err) => {
+        if (err?.name !== "AbortError") console.error("Failed to load rooms", err);
+      });
+    return () => ac.abort();
+  }, []);
+
+  useEffect(() => {
+    const ac = new AbortController();
+    const fetchCalls = async () => {
+      if (hasLoadedOnce.current) {
+        setIsRefreshing(true);
+      } else {
+        setIsLoading(true);
+      }
       setError("");
       try {
-        const params = [];
-        if (startDate) params.push(`startDate=${encodeURIComponent(startDate)}`);
-        if (endDate) params.push(`endDate=${encodeURIComponent(endDate)}`);
-        if (search) params.push(`search=${encodeURIComponent(search)}`);
-        if (statusFilter) params.push(`status=${encodeURIComponent(statusFilter)}`);
-        if (roomFilter) params.push(`room=${encodeURIComponent(roomFilter)}`);
-        if (mutedFilter) params.push(`muted=${encodeURIComponent(mutedFilter)}`);
-        params.push(`page=${page}`);
-        params.push(`pageSize=${apiPageSize}`);
-        const [callsResp, roomsResp] = await Promise.all([
-          fetch(callsHistoryUrl(params.join("&"))),
-          fetch(roomsApiUrl()),
-        ]);
+        const query = buildCallsHistoryParams(
+          {
+            startDate,
+            endDate,
+            search: debouncedSearch,
+            statusFilter,
+            roomFilter,
+            mutedFilter,
+          },
+          page,
+          apiPageSize
+        );
+        const callsResp = await fetch(callsHistoryUrl(query), { signal: ac.signal });
         const callsData = await callsResp.json();
-        const roomsData = await roomsResp.json();
-        if (callsResp.ok && callsData.success && roomsResp.ok && roomsData.success) {
+        if (callsResp.ok && callsData.success) {
           setCalls(callsData.data || []);
-          setRooms(roomsData.data || []);
           setTotalPages(callsData.totalPages || 1);
           setTotalCount(callsData.totalCount ?? (callsData.data?.length || 0));
+          hasLoadedOnce.current = true;
         } else {
           setError("Failed to fetch data");
         }
-      } catch {
+      } catch (err: unknown) {
+        if (err instanceof Error && err.name === "AbortError") return;
         setError("Error connecting to server");
       } finally {
         setIsLoading(false);
+        setIsRefreshing(false);
       }
     };
-    fetchData();
-  }, [startDate, endDate, search, statusFilter, roomFilter, mutedFilter, page, pageSizeOption, apiPageSize]);
+    fetchCalls();
+    return () => ac.abort();
+  }, [startDate, endDate, debouncedSearch, statusFilter, roomFilter, mutedFilter, page, apiPageSize]);
 
   const paginatedCalls = calls;
   const rangeStart = totalCount === 0 ? 0 : (page - 1) * apiPageSize + 1;
@@ -87,14 +117,16 @@ export default function ReportsPage() {
     setPage(1);
   };
 
-  const getCallTypeDisplay = (call: { callType?: number | null; callTypeLabel?: string; status?: number }) => {
+  const getCallTypeDisplay = useCallback((call: { callType?: number | null; callTypeLabel?: string; status?: number }) => {
     if (call.callTypeLabel) return call.callTypeLabel;
     if (call.callType != null) return getCallTypeName(call.callType);
     if (call.status != null && call.status >= 1 && call.status <= 4) return getCallTypeName(call.status);
     return "";
-  };
+  }, []);
 
-  const exportExcel = () => {
+  const exportExcel = async () => {
+    const XLSX = await import("xlsx");
+    const { saveAs } = await import("file-saver");
     const ws = XLSX.utils.json_to_sheet(calls.map(call => ({
       "Room": call.roomName,
       "Department": getDepartmentTypeName(Number(call.departmentType)),
@@ -115,7 +147,9 @@ export default function ReportsPage() {
     saveAs(new Blob([buf], { type: "application/octet-stream" }), "call_history.xlsx");
   };
 
-  const exportPDF = () => {
+  const exportPDF = async () => {
+    const { default: jsPDF } = await import("jspdf");
+    const { default: autoTable } = await import("jspdf-autotable");
     const doc = new jsPDF();
     doc.text("Call History Report", 14, 16);
     autoTable(doc, {
@@ -152,17 +186,17 @@ export default function ReportsPage() {
                 onChange={(e) => setSearch(e.target.value)}
                 className="min-w-[180px] flex-1"
               />
-              <Select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="min-w-[140px] flex-1">
+              <Select value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setPage(1); }} className="min-w-[140px] flex-1">
                 <option value="">All Statuses</option>
                 <option value="active">Active</option>
                 <option value="resolved">Resolved</option>
               </Select>
-              <Select value={mutedFilter} onChange={e => setMutedFilter(e.target.value)} className="min-w-[120px] flex-1">
+              <Select value={mutedFilter} onChange={e => { setMutedFilter(e.target.value); setPage(1); }} className="min-w-[120px] flex-1">
                 <option value="">All</option>
                 <option value="true">Muted</option>
                 <option value="false">Unmuted</option>
               </Select>
-              <Select value={roomFilter} onChange={e => setRoomFilter(e.target.value)} className="min-w-[160px] flex-1">
+              <Select value={roomFilter} onChange={e => { setRoomFilter(e.target.value); setPage(1); }} className="min-w-[160px] flex-1">
                 <option value="">All Rooms</option>
                 {rooms.map((room) => (
                   <option key={room.id} value={room.id}>{room.roomName}</option>
@@ -171,10 +205,10 @@ export default function ReportsPage() {
             </div>
             <div className="flex flex-wrap gap-4 items-center mt-4">
               <label className="text-gray-700 dark:text-gray-300">Start Date:</label>
-              <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="border rounded px-2 py-1 min-w-[140px] flex-1 dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
+              <input type="date" value={startDate} onChange={e => { setStartDate(e.target.value); setPage(1); }} className="border rounded px-2 py-1 min-w-[140px] flex-1 dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
               <span className="text-gray-500 dark:text-gray-300">to</span>
               <label className="text-gray-700 dark:text-gray-300">End Date:</label>
-              <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="border rounded px-2 py-1 min-w-[140px] flex-1 dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
+              <input type="date" value={endDate} onChange={e => { setEndDate(e.target.value); setPage(1); }} className="border rounded px-2 py-1 min-w-[140px] flex-1 dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
               <button onClick={exportExcel} className="px-3 py-1 bg-green-600 text-white rounded min-w-[120px]">Export Excel</button>
               <button onClick={exportPDF} className="px-3 py-1 bg-blue-600 text-white rounded min-w-[120px]">Export PDF</button>
             </div>
@@ -213,6 +247,11 @@ export default function ReportsPage() {
                     {totalCount === 0
                       ? "No records"
                       : `Showing ${rangeStart}–${rangeEnd} of ${totalCount}`}
+                    {isRefreshing && (
+                      <span className="ml-2 inline-flex items-center gap-1 text-blue-600 dark:text-blue-400">
+                        <Spinner size="sm" /> Updating…
+                      </span>
+                    )}
                   </p>
                 )}
               </div>
@@ -241,7 +280,7 @@ export default function ReportsPage() {
             ) : paginatedCalls.length === 0 ? (
               <div className="text-center text-gray-600 dark:text-gray-300 py-8">No call history found</div>
             ) : (
-              <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
+              <div className={`overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700 ${isRefreshing ? "opacity-70 pointer-events-none" : ""}`}>
                 <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                   <thead className="bg-gray-50 dark:bg-gray-700 sticky top-0">
                     <tr>

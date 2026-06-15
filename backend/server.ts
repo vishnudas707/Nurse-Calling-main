@@ -664,14 +664,19 @@ app.get("/api/calls/history", async (req: Request, res: Response) => {
     if (where.length > 0) {
       countQuery += ' WHERE ' + where.join(' AND ');
     }
-    const reqDb = pool.request();
-    params.forEach(p => reqDb.input(p.name, p.type, p.value));
-    const countResult = await reqDb.query(countQuery);
+    const countReq = pool.request();
+    const dataReq = pool.request();
+    params.forEach(p => {
+      countReq.input(p.name, p.type, p.value);
+      dataReq.input(p.name, p.type, p.value);
+    });
+    const paginatedQuery = `${query} OFFSET ${(Number(page) - 1) * Number(pageSize)} ROWS FETCH NEXT ${Number(pageSize)} ROWS ONLY`;
+    const [countResult, result] = await Promise.all([
+      countReq.query(countQuery),
+      dataReq.query(paginatedQuery),
+    ]);
     const totalCount = countResult.recordset[0]?.total || 0;
     const totalPages = Math.ceil(totalCount / Number(pageSize));
-    // Add pagination to main query
-    query += ` OFFSET ${(Number(page) - 1) * Number(pageSize)} ROWS FETCH NEXT ${Number(pageSize)} ROWS ONLY`;
-    const result = await reqDb.query(query);
     const calls = result.recordset.map((row: any) =>
       withCallTypeFields(withCallStatusFields({
         id: row.id,
