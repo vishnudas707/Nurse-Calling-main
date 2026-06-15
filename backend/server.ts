@@ -35,12 +35,17 @@ const PORT = process.env.PORT || 5001;
 // Repeated call logging (minimal, additive)
 // IMPORTANT: This service user may not have DDL permissions in production.
 // So we only *use* CallRepeat table if it already exists.
+let callRepeatTableCache: boolean | null = null;
+
 async function hasCallRepeatTable(pool: any): Promise<boolean> {
+  if (callRepeatTableCache !== null) return callRepeatTableCache;
   try {
     const r = await pool.request().query(`SELECT OBJECT_ID(N'[dbo].[CallRepeat]', N'U') AS objId`);
-    return !!r?.recordset?.[0]?.objId;
+    callRepeatTableCache = !!r?.recordset?.[0]?.objId;
+    return callRepeatTableCache;
   } catch (err) {
     console.error('[CallRepeat] Table existence check failed:', err);
+    callRepeatTableCache = false;
     return false;
   }
 }
