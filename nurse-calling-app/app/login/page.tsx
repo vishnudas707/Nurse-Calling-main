@@ -4,7 +4,7 @@ import { DarkThemeToggle } from "flowbite-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { saveUserSession } from "../lib/auth";
+import { saveUserSession, getPostLoginPath } from "../lib/auth";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -69,7 +69,7 @@ export default function LoginPage() {
         }
       }
 
-      router.push("/dashboard");
+      router.push(getPostLoginPath(user?.role));
     } catch (err) {
       console.error(err);
       setError("Login failed. Please try again.");

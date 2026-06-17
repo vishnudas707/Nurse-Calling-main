@@ -1,5 +1,5 @@
 
-import express, { Express, Request, Response } from "express";
+import express, { Express, Request, Response, NextFunction } from "express";
 import http from "http";
 import { Server as SocketIOServer } from "socket.io";
 import cors from "cors";
@@ -25,6 +25,30 @@ dotenv.config();
 
 const USER_TABLE = process.env.USER_TABLE || 'User';
 const ORGANISATION_TABLE = process.env.ORGANISATION_TABLE || 'Organisation';
+const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
+const SUPER_ADMIN_ROLE = 'super_admin';
+
+interface AuthRequest extends Request {
+  authUser?: { id: string; role: string };
+}
+
+function requireSuperAdmin(req: AuthRequest, res: Response, next: NextFunction) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith('Bearer ')) {
+    return res.status(401).json({ success: false, error: 'Unauthorized' });
+  }
+  try {
+    const token = authHeader.slice(7);
+    const payload = jwt.verify(token, JWT_SECRET) as { id: string; role: string };
+    if (payload.role !== SUPER_ADMIN_ROLE) {
+      return res.status(403).json({ success: false, error: 'Forbidden: super admin only' });
+    }
+    req.authUser = payload;
+    next();
+  } catch {
+    return res.status(401).json({ success: false, error: 'Invalid or expired token' });
+  }
+}
 
 
 const app: Express = express();
@@ -185,7 +209,7 @@ app.post("/api/auth/register", async (req: Request, res: Response) => {
     const insertResult = await insertReq.query(insertQuery);
     console.log('[REG] insertResult:', insertResult && insertResult.rowsAffected ? insertResult.rowsAffected : insertResult);
 
-    const token = jwt.sign({ id, role }, process.env.JWT_SECRET || 'dev_secret', { expiresIn: '8h' });
+    const token = jwt.sign({ id, role }, JWT_SECRET, { expiresIn: '8h' });
 
     return res.status(201).json({ success: true, data: { id, organisationId, name, email, role }, token });
   } catch (err) {
@@ -210,12 +234,80 @@ app.post("/api/auth/login", async (req: Request, res: Response) => {
     const match = await bcrypt.compare(password, user.password);
     if (!match) return res.status(401).json({ error: 'Invalid credentials' });
 
-    const token = jwt.sign({ id: user.id, role: user.role }, process.env.JWT_SECRET || 'dev_secret', { expiresIn: '8h' });
+    const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '8h' });
 
     return res.status(200).json({ success: true, user: { id: user.id, name: user.name, email: user.email, role: user.role, organisationId: user.organisationId }, token });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+// Super admin — organisations & users
+app.get("/api/admin/organisations", requireSuperAdmin, async (_req: Request, res: Response) => {
+  try {
+    const pool = await getPool();
+    const result = await pool.request().query(
+      `SELECT id, name, address, phoneNo, contactPerson, hid FROM [${ORGANISATION_TABLE}] ORDER BY id`
+    );
+    return res.status(200).json({ success: true, data: result.recordset });
+  } catch (err) {
+    console.error("[ADMIN ORGANISATIONS GET] Error:", err);
+    return res.status(500).json({ success: false, error: "Failed to fetch organisations" });
+  }
+});
+
+app.post("/api/admin/organisations", requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const { id, name, address, phoneNo, contactPerson, hid } = req.body;
+    if (!id || !name) {
+      return res.status(400).json({ success: false, error: "id and name are required" });
+    }
+    const hidStr = hid ? String(hid) : null;
+    if (hidStr && !/^\d{10}$/.test(hidStr)) {
+      return res.status(400).json({ success: false, error: "hid must be a 10-digit number" });
+    }
+    const pool = await getPool();
+    const exists = await pool.request()
+      .input("id", sql.NVarChar(50), id)
+      .query(`SELECT id FROM [${ORGANISATION_TABLE}] WHERE id = @id`);
+    if (exists.recordset.length > 0) {
+      return res.status(409).json({ success: false, error: "Organisation with this id already exists" });
+    }
+    const insertReq = pool.request();
+    insertReq.input("id", sql.NVarChar(50), id);
+    insertReq.input("name", sql.NVarChar(200), name);
+    insertReq.input("address", sql.NVarChar(500), address || null);
+    insertReq.input("phoneNo", sql.NVarChar(50), phoneNo || null);
+    insertReq.input("contactPerson", sql.NVarChar(200), contactPerson || null);
+    insertReq.input("hid", sql.NVarChar(20), hidStr);
+    await insertReq.query(
+      `INSERT INTO [${ORGANISATION_TABLE}] (id, name, address, phoneNo, contactPerson, hid)
+       VALUES (@id, @name, @address, @phoneNo, @contactPerson, @hid)`
+    );
+    return res.status(201).json({
+      success: true,
+      data: { id, name, address: address || null, phoneNo: phoneNo || null, contactPerson: contactPerson || null, hid: hidStr },
+    });
+  } catch (err) {
+    console.error("[ADMIN ORGANISATIONS POST] Error:", err);
+    return res.status(500).json({ success: false, error: "Failed to create organisation" });
+  }
+});
+
+app.get("/api/admin/users", requireSuperAdmin, async (_req: Request, res: Response) => {
+  try {
+    const pool = await getPool();
+    const result = await pool.request().query(
+      `SELECT u.id, u.name, u.email, u.role, u.organisationId, u.address, o.name AS organisationName
+       FROM [${USER_TABLE}] u
+       LEFT JOIN [${ORGANISATION_TABLE}] o ON u.organisationId = o.id
+       ORDER BY u.name`
+    );
+    return res.status(200).json({ success: true, data: result.recordset });
+  } catch (err) {
+    console.error("[ADMIN USERS GET] Error:", err);
+    return res.status(500).json({ success: false, error: "Failed to fetch users" });
   }
 });
 
