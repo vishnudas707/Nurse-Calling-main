@@ -120,7 +120,7 @@ export default function ReportsPage() {
   const getCallTypeDisplay = useCallback((call: { callType?: number | null; callTypeLabel?: string; status?: number }) => {
     if (call.callTypeLabel) return call.callTypeLabel;
     if (call.callType != null) return getCallTypeName(call.callType);
-    if (call.status != null && call.status >= 1 && call.status <= 4) return getCallTypeName(call.status);
+    if (call.status != null && call.status >= 1 && call.status <= 5) return getCallTypeName(call.status);
     return "";
   }, []);
 
@@ -310,12 +310,13 @@ export default function ReportsPage() {
                         <td className="px-4 py-2 whitespace-nowrap">{call.floor || ''}</td>
                         <td className="px-4 py-2 whitespace-nowrap">
                           {(() => {
-                            const typeNum = call.callType ?? (call.status >= 1 && call.status <= 4 ? call.status : null);
+                            const typeNum = call.callType ?? (call.status >= 1 && call.status <= 5 ? call.status : null);
                             return (
                               <span className={`px-2 py-1 rounded text-xs font-semibold ${
                                 typeNum === 2 || typeNum === 4 ? "bg-red-200 text-red-800"
                                 : typeNum === 3 ? "bg-blue-200 text-blue-800"
                                 : typeNum === 1 ? "bg-green-200 text-green-800"
+                                : typeNum === 5 ? "bg-purple-200 text-purple-800"
                                 : "bg-gray-200 text-gray-800"
                               }`}>{getCallTypeDisplay(call)}</span>
                             );

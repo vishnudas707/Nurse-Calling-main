@@ -5,7 +5,7 @@
 import TopNavBar from "../components/navbar";
 import { Card } from "flowbite-react";
 import { getOrganisationId } from "../lib/auth";
-import { getCallTypeName } from "../lib/constants";
+import { getCallTypeName, MISCELLANEOUS_CALL_TYPE } from "../lib/constants";
 import { getCallStateLabel, isCallActive } from "../reports/lib/report-utils";
 
 import { useEffect, useState, useCallback, useMemo } from "react";
@@ -241,7 +241,7 @@ function saveClearedCallIds(orgId: string | null, ids: Set<string>) {
           const resp = await fetch(`${API_BASE}/api/calls/active${orgQuery}`);
           const data = await resp.json();
           if (resp.ok && data.success) {
-            setActiveCalls(data.data || []);
+            setActiveCalls((data.data || []).filter((c: { callType?: number }) => c.callType !== MISCELLANEOUS_CALL_TYPE));
           } else {
             setError(data.error || "Failed to fetch active calls");
           }
@@ -263,7 +263,7 @@ function saveClearedCallIds(orgId: string | null, ids: Set<string>) {
           );
           const data = await resp.json();
           if (resp.ok && data.success) {
-            setRecentHistory(data.data.slice(0, 5));
+            setRecentHistory((data.data || []).filter((c: { callType?: number }) => c.callType !== MISCELLANEOUS_CALL_TYPE).slice(0, 5));
           }
         } catch (err) {
           console.error("Error fetching recent history", err);
@@ -277,7 +277,7 @@ function saveClearedCallIds(orgId: string | null, ids: Set<string>) {
           );
           const data = await resp.json();
           if (resp.ok && data.success) {
-            setTodayHistory(data.data || []);
+            setTodayHistory((data.data || []).filter((c: { callType?: number }) => c.callType !== MISCELLANEOUS_CALL_TYPE));
           }
         } catch (err) {
           console.error("Error fetching today history", err);
@@ -305,6 +305,7 @@ function saveClearedCallIds(orgId: string | null, ids: Set<string>) {
       // Listen for call events with try-catch
       s.on("call:new", (call) => {
         try {
+          if (call?.callType === MISCELLANEOUS_CALL_TYPE) return;
           console.log('[SocketIO] Received call:new', call);
           setActiveCalls((prev) => {
             // If call already exists, do nothing; else, add new card

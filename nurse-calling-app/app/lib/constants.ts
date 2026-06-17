@@ -44,13 +44,19 @@ export const getDepartmentTypeOptions = () => {
   }));
 };
 
-/** Call type: 1 = Normal, 2 = Emergency, 3 = Code Blue, 4 = Toilet */
+/** Call type: 1 = Normal, 2 = Emergency, 3 = Code Blue, 4 = Toilet, 5 = Miscellaneous (reports only) */
 export const CALL_TYPE_MAP: Record<number, string> = {
   1: "Normal",
   2: "Emergency",
   3: "Code Blue",
   4: "Toilet",
+  5: "Miscellaneous",
 };
+
+export const MISCELLANEOUS_CALL_TYPE = 5;
+
+export const isMiscellaneousCallType = (callType: number | null | undefined) =>
+  Number(callType) === MISCELLANEOUS_CALL_TYPE;
 
 export const getCallTypeName = (callType: number): string =>
   CALL_TYPE_MAP[callType] ?? `Unknown (${callType})`;

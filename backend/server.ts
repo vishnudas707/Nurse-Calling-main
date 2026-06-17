@@ -17,6 +17,8 @@ import {
   isValidCallStatus,
   withCallStatusFields,
   withCallTypeFields,
+  MISCELLANEOUS_CALL_TYPE,
+  isCallRecordActive,
 } from "./constants";
 
 dotenv.config();
@@ -434,7 +436,7 @@ app.get("/api/calls/active", async (req: Request, res: Response) => {
       `SELECT cs.[id], cs.[roomId], cs.[currentStatus], cs.[callType], cs.[dateTime], cs.[isMuted], cs.[dateTimeReset], r.[roomName]
        FROM [CallStatus] cs
        LEFT JOIN [Room] r ON cs.[roomId] = r.[id]
-       WHERE cs.[currentStatus] <> 0`;
+       WHERE cs.[currentStatus] <> 0 AND ISNULL(cs.[callType], cs.[currentStatus]) <> ${MISCELLANEOUS_CALL_TYPE}`;
     if (organisationId) {
       request.input('organisationId', sql.NVarChar(50), String(organisationId));
       query += ` AND r.[organisationId] = @organisationId`;
@@ -490,6 +492,40 @@ app.post("/api/calls", async (req: Request, res: Response) => {
     const callId = `CALL_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
     const now = new Date();
     const statusNumber = Number(status);
+    if (statusNumber === MISCELLANEOUS_CALL_TYPE) {
+      const callId = `CALL_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+      const now = new Date();
+      const insertReq = pool.request();
+      insertReq.input("id", sql.NVarChar(50), callId);
+      insertReq.input("roomId", sql.NVarChar(50), roomId);
+      insertReq.input("currentStatus", sql.Int, 0);
+      insertReq.input("callType", sql.Int, MISCELLANEOUS_CALL_TYPE);
+      insertReq.input("dateTime", sql.DateTime, now);
+      insertReq.input("isMuted", sql.Int, 0);
+      insertReq.input("mutedDateTime", sql.DateTime, null);
+      insertReq.input("dateTimeReset", sql.DateTime, now);
+      await insertReq.query(
+        `INSERT INTO [CallStatus] (id, roomId, currentStatus, callType, dateTime, isMuted, mutedDateTime, dateTimeReset)
+         VALUES (@id, @roomId, @currentStatus, @callType, @dateTime, @isMuted, @mutedDateTime, @dateTimeReset)`
+      );
+      const roomInfo = await pool.request()
+        .input('id', sql.NVarChar(50), roomId)
+        .query(`SELECT roomName FROM [Room] WHERE id = @id`);
+      const roomName = roomInfo.recordset.length ? roomInfo.recordset[0].roomName : '';
+      const newCall = withCallTypeFields(withCallStatusFields({
+        id: callId,
+        roomId,
+        roomName,
+        status: 0,
+        callType: MISCELLANEOUS_CALL_TYPE,
+        timestamp: now,
+        minutesAgo: 0,
+        muted: false,
+        dateTimeReset: now,
+        organisationId,
+      }));
+      return res.status(201).json({ success: true, data: newCall });
+    }
     const currentStatus = [1, 2, 3, 4].includes(statusNumber) ? statusNumber : 1;
     const insertReq = pool.request();
     insertReq.input("id", sql.NVarChar(50), callId);
@@ -635,9 +671,9 @@ app.get("/api/calls/history", async (req: Request, res: Response) => {
     if (status) {
       const statusStr = String(status).toLowerCase();
       if (statusStr === "active") {
-        where.push("cs.[currentStatus] <> 0");
+        where.push("cs.[currentStatus] <> 0 AND cs.[dateTimeReset] IS NULL");
       } else if (statusStr === "resolved" || statusStr === "0") {
-        where.push("cs.[currentStatus] = 0");
+        where.push("(cs.[currentStatus] = 0 OR cs.[dateTimeReset] IS NOT NULL)");
       } else {
         where.push("cs.[currentStatus] = @status");
         params.push({ name: "status", type: sql.Int, value: Number(status) });
@@ -683,7 +719,7 @@ app.get("/api/calls/history", async (req: Request, res: Response) => {
         roomId: row.roomId,
         roomName: row.roomName || '',
         status: row.currentStatus,
-        isActive: row.currentStatus !== 0,
+        isActive: isCallRecordActive(row),
         callType: row.callType ?? (row.currentStatus >= 1 && row.currentStatus <= 4 ? row.currentStatus : null),
         timestamp: row.dateTime,
         muted: row.isMuted === 1 || row.isMuted === true,
@@ -729,6 +765,33 @@ function parseRoomStatusParams(query: Request["query"]): { roomNo: string; statu
   return rooms;
 }
 
+async function insertMiscellaneousCall(
+  pool: Awaited<ReturnType<typeof getPool>>,
+  roomId: string,
+  dnum: string
+): Promise<{ httpStatus: number; result: string; message: string }> {
+  const callId = `CALL_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+  const now = new Date();
+  const insertReq = pool.request();
+  insertReq.input("id", sql.NVarChar(50), callId);
+  insertReq.input("roomId", sql.NVarChar(50), roomId);
+  insertReq.input("currentStatus", sql.Int, 0);
+  insertReq.input("callType", sql.Int, MISCELLANEOUS_CALL_TYPE);
+  insertReq.input("dateTime", sql.DateTime, now);
+  insertReq.input("isMuted", sql.Int, 0);
+  insertReq.input("mutedDateTime", sql.DateTime, null);
+  insertReq.input("dateTimeReset", sql.DateTime, now);
+  await insertReq.query(
+    `INSERT INTO [CallStatus] (id, roomId, currentStatus, callType, dateTime, isMuted, mutedDateTime, dateTimeReset)
+     VALUES (@id, @roomId, @currentStatus, @callType, @dateTime, @isMuted, @mutedDateTime, @dateTimeReset)`
+  );
+  return {
+    httpStatus: 200,
+    result: "SUCCESS",
+    message: `Room ${dnum}: miscellaneous call logged (reports only)`,
+  };
+}
+
 async function processCallStatusForRoom(
   pool: Awaited<ReturnType<typeof getPool>>,
   orgId: string,
@@ -738,7 +801,8 @@ async function processCallStatusForRoom(
   repeatEnabled: boolean
 ): Promise<{ httpStatus: number; result: string; message?: string; error?: string }> {
   const isReset = statusNumber === 0;
-  const isActivate = !Number.isNaN(statusNumber) && statusNumber !== 0;
+  const isMiscellaneous = statusNumber === MISCELLANEOUS_CALL_TYPE;
+  const isActivate = !Number.isNaN(statusNumber) && statusNumber !== 0 && !isMiscellaneous;
 
   const roomResult = await pool.request()
     .input('organisationId', sql.NVarChar(50), String(orgId))
@@ -751,6 +815,11 @@ async function processCallStatusForRoom(
     return { httpStatus: 404, result: "FAILURE", error: `Room not found for room ${dnum} on floor ${floor}` };
   }
   const roomId = roomResult.recordset[0].id;
+
+  if (isMiscellaneous) {
+    return insertMiscellaneousCall(pool, roomId, dnum);
+  }
+
   const activeCallResult = await pool.request()
     .input('roomId', sql.NVarChar(50), roomId)
     .query(`SELECT TOP 1 id, currentStatus, callType, dateTime, isMuted, dateTimeReset FROM [CallStatus] WHERE roomId = @roomId AND currentStatus <> 0 ORDER BY dateTime DESC`);
@@ -806,7 +875,7 @@ async function processCallStatusForRoom(
     return { httpStatus: 200, result: "SUCCESS", message: `Room ${dnum}: call status reset` };
   }
   if (!isActivate && !isReset) {
-    return { httpStatus: 400, result: "FAILURE", error: `Room ${dnum}: invalid status (use 0=reset, 1=normal, 2=emergency, 3=code blue, 4=toilet)` };
+    return { httpStatus: 400, result: "FAILURE", error: `Room ${dnum}: invalid status (use 0=reset, 1=normal, 2=emergency, 3=code blue, 4=toilet, 5=miscellaneous)` };
   }
   const callId = `CALL_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
   const insertReq = pool.request();
@@ -857,7 +926,7 @@ app.get("/api/callstatus", (req: Request, res: Response) => {
 
 // Insert record into CallStatus via GET (for device integration)
 // URL: /api/callstatus/insert?orgId=00001&hid=1234567890&floor=1&r01=1&r02=2&r22=3
-// r{roomNo}=0 reset | 1 normal (green) | 2 emergency (red) | 3 code blue (blue) | 4 toilet (red)
+// r{roomNo}=0 reset | 1 normal | 2 emergency | 3 code blue | 4 toilet | 5 miscellaneous (reports only)
 app.get("/api/callstatus/insert", async (req: Request, res: Response) => {
   const sendCallStatusResult = (httpStatus: number, ok: boolean) =>
     res.status(httpStatus).type("text/plain").send(ok ? "SUCCESS" : "FAILURE");

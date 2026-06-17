@@ -38,25 +38,32 @@ export const CALL_STATUS_MAP: Record<
   2: { label: "Emergency", color: "red" },
   3: { label: "Code Blue", color: "blue" },
   4: { label: "Toilet", color: "red" },
+  5: { label: "Miscellaneous", color: "gray" },
 };
 
 export const getCallStatusMeta = (status: number) =>
   CALL_STATUS_MAP[status] ?? { label: `Unknown (${status})`, color: "gray" as const };
 
 export const isValidCallStatus = (status: number) =>
-  !Number.isNaN(status) && status >= 0 && status <= 4;
+  !Number.isNaN(status) && status >= 0 && status <= 5;
+
+export const MISCELLANEOUS_CALL_TYPE = 5;
+
+export const isMiscellaneousCallType = (callType: number | null | undefined) =>
+  Number(callType) === MISCELLANEOUS_CALL_TYPE;
 
 export const withCallStatusFields = <T extends { status: number }>(call: T) => {
   const { label, color } = getCallStatusMeta(call.status);
   return { ...call, statusLabel: label, color };
 };
 
-/** Call type stored in CallStatus.callType (1–4 only; 0 = reset has no type) */
+/** Call type stored in CallStatus.callType (1–5; 5 = miscellaneous, reports only) */
 export const CALL_TYPE_MAP: Record<number, string> = {
   1: "Normal",
   2: "Emergency",
   3: "Code Blue",
   4: "Toilet",
+  5: "Miscellaneous",
 };
 
 export const getCallTypeName = (callType: number): string =>
@@ -66,3 +73,9 @@ export const withCallTypeFields = <T extends { callType?: number | null }>(call:
   ...call,
   callTypeLabel: call.callType != null ? getCallTypeName(call.callType) : "",
 });
+
+/** Active = not reset; resolved when currentStatus is 0 or dateTimeReset is set */
+export const isCallRecordActive = (row: {
+  currentStatus: number;
+  dateTimeReset?: Date | string | null;
+}) => row.currentStatus !== 0 && (row.dateTimeReset == null || row.dateTimeReset === "");

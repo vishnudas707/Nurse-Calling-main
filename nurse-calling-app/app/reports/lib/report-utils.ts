@@ -74,6 +74,7 @@ export function toDayKey(value: unknown) {
 }
 
 export function isCallActive(call: CallRecord): boolean {
+  if (call?.dateTimeReset) return false;
   if (call?.isActive !== undefined) return Boolean(call.isActive);
   return Number(call?.status) !== 0;
 }
