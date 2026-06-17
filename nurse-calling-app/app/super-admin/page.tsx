@@ -1,17 +1,21 @@
 "use client";
 
 import TopNavBar from "../components/navbar";
-import { Card, Spinner, TextInput, Label, Button } from "flowbite-react";
+import { Card, Spinner, TextInput, Label, Button, Select } from "flowbite-react";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  authHeaders,
   getAuthToken,
   getStoredUser,
   isSuperAdmin,
 } from "../lib/auth";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5001";
+import {
+  adminDelete,
+  adminGet,
+  adminPost,
+  adminPut,
+  normalizeRole,
+} from "../lib/admin-api";
 
 type Organisation = {
   id: string;
@@ -41,11 +45,29 @@ const emptyOrgForm = {
   hid: "",
 };
 
+const emptyUserForm = {
+  name: "",
+  email: "",
+  role: "user",
+  organisationId: "",
+  address: "",
+  password: "",
+};
+
+const ROLE_OPTIONS = [
+  { value: "user", label: "User" },
+  { value: "admin", label: "Admin" },
+  { value: "super_admin", label: "Super Admin" },
+];
+
 export default function SuperAdminPage() {
   const router = useRouter();
   const [organisations, setOrganisations] = useState<Organisation[]>([]);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [formData, setFormData] = useState(emptyOrgForm);
+  const [editingOrgId, setEditingOrgId] = useState<string | null>(null);
+  const [userForm, setUserForm] = useState(emptyUserForm);
+  const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -53,35 +75,25 @@ export default function SuperAdminPage() {
 
   const fetchData = useCallback(async () => {
     setError("");
-    try {
-      const headers = {
-        "Content-Type": "application/json",
-        ...authHeaders(),
-      };
-      const [orgsResp, usersResp] = await Promise.all([
-        fetch(`${API_BASE}/api/admin/organisations`, { headers }),
-        fetch(`${API_BASE}/api/admin/users`, { headers }),
-      ]);
-      const orgsData = await orgsResp.json();
-      const usersData = await usersResp.json();
+    const [orgsResult, usersResult] = await Promise.all([
+      adminGet<{ success: boolean; data: Organisation[] }>("/api/admin/organisations"),
+      adminGet<{ success: boolean; data: AdminUser[] }>("/api/admin/users"),
+    ]);
 
-      if (orgsResp.status === 401 || orgsResp.status === 403) {
-        setError(orgsData.error || "Access denied. Super admin login required.");
-        return;
-      }
-      if (!orgsResp.ok || !orgsData.success) {
-        setError(orgsData.error || "Failed to load organisations");
-        return;
-      }
-      if (!usersResp.ok || !usersData.success) {
-        setError(usersData.error || "Failed to load users");
-        return;
-      }
-      setOrganisations(orgsData.data || []);
-      setUsers(usersData.data || []);
-    } catch {
-      setError("Error connecting to server");
+    if (orgsResult.status === 401 || orgsResult.status === 403) {
+      setError(orgsResult.error || "Access denied. Super admin login required.");
+      return;
     }
+    if (!orgsResult.ok) {
+      setError(orgsResult.error || "Failed to load organisations");
+      return;
+    }
+    if (!usersResult.ok) {
+      setError(usersResult.error || "Failed to load users");
+      return;
+    }
+    setOrganisations(orgsResult.data.data || []);
+    setUsers(usersResult.data.data || []);
   }, []);
 
   useEffect(() => {
@@ -99,15 +111,61 @@ export default function SuperAdminPage() {
     load();
   }, [router, fetchData]);
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const clearMessages = () => {
+    setError("");
+    setSuccessMessage("");
+  };
+
+  const handleOrgInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
-  const handleAddOrganisation = async (e: React.FormEvent) => {
+  const handleUserInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const { name, value } = e.target;
+    setUserForm((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const resetOrgForm = () => {
+    setFormData(emptyOrgForm);
+    setEditingOrgId(null);
+  };
+
+  const resetUserForm = () => {
+    setUserForm(emptyUserForm);
+    setEditingUserId(null);
+  };
+
+  const startEditOrg = (org: Organisation) => {
+    clearMessages();
+    setEditingOrgId(org.id);
+    setFormData({
+      id: org.id,
+      name: org.name || "",
+      address: org.address || "",
+      phoneNo: org.phoneNo || "",
+      contactPerson: org.contactPerson || "",
+      hid: org.hid || "",
+    });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const startEditUser = (user: AdminUser) => {
+    clearMessages();
+    setEditingUserId(user.id);
+    setUserForm({
+      name: user.name || "",
+      email: user.email || "",
+      role: normalizeRole(user.role),
+      organisationId: user.organisationId || "",
+      address: user.address || "",
+      password: "",
+    });
+  };
+
+  const handleSaveOrganisation = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError("");
-    setSuccessMessage("");
+    clearMessages();
 
     if (!formData.id.trim() || !formData.name.trim()) {
       setError("Organisation ID and name are required");
@@ -120,28 +178,101 @@ export default function SuperAdminPage() {
 
     setIsSubmitting(true);
     try {
-      const resp = await fetch(`${API_BASE}/api/admin/organisations`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...authHeaders(),
-        },
-        body: JSON.stringify({
-          id: formData.id.trim(),
-          name: formData.name.trim(),
-          address: formData.address.trim() || null,
-          phoneNo: formData.phoneNo.trim() || null,
-          contactPerson: formData.contactPerson.trim() || null,
-          hid: formData.hid.trim() || null,
-        }),
-      });
-      const data = await resp.json();
-      if (!resp.ok || !data.success) {
-        setError(data.error || "Failed to create organisation");
+      const payload = {
+        name: formData.name.trim(),
+        address: formData.address.trim() || null,
+        phoneNo: formData.phoneNo.trim() || null,
+        contactPerson: formData.contactPerson.trim() || null,
+        hid: formData.hid.trim() || null,
+      };
+      const isEdit = Boolean(editingOrgId);
+      const result = isEdit
+        ? await adminPut(`/api/admin/organisations/${encodeURIComponent(editingOrgId!)}`, payload)
+        : await adminPost("/api/admin/organisations", { id: formData.id.trim(), ...payload });
+
+      if (!result.ok) {
+        setError(result.error || `Failed to ${isEdit ? "update" : "create"} organisation`);
         return;
       }
-      setSuccessMessage(`Organisation "${formData.name}" created successfully`);
-      setFormData(emptyOrgForm);
+      setSuccessMessage(`Organisation "${formData.name}" ${isEdit ? "updated" : "created"} successfully`);
+      resetOrgForm();
+      await fetchData();
+    } catch {
+      setError("Error connecting to server");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDeleteOrg = async (org: Organisation) => {
+    if (!window.confirm(`Delete organisation "${org.name}" (${org.id})?`)) return;
+    clearMessages();
+    setIsSubmitting(true);
+    try {
+      const result = await adminDelete(`/api/admin/organisations/${encodeURIComponent(org.id)}`);
+      if (!result.ok) {
+        setError(result.error || "Failed to delete organisation");
+        return;
+      }
+      if (editingOrgId === org.id) resetOrgForm();
+      setSuccessMessage(`Organisation "${org.name}" deleted`);
+      await fetchData();
+    } catch {
+      setError("Error connecting to server");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleSaveUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    clearMessages();
+    if (!editingUserId) return;
+
+    if (!userForm.name.trim() || !userForm.role || !userForm.organisationId.trim()) {
+      setError("User name, role and organisation are required");
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const body: Record<string, string | null> = {
+        name: userForm.name.trim(),
+        email: userForm.email.trim() || null,
+        role: normalizeRole(userForm.role),
+        organisationId: userForm.organisationId.trim(),
+        address: userForm.address.trim() || null,
+      };
+      if (userForm.password.trim()) {
+        body.password = userForm.password;
+      }
+      const result = await adminPut(`/api/admin/users/${encodeURIComponent(editingUserId)}`, body);
+      if (!result.ok) {
+        setError(result.error || "Failed to update user");
+        return;
+      }
+      setSuccessMessage(`User "${userForm.name}" updated successfully`);
+      resetUserForm();
+      await fetchData();
+    } catch {
+      setError("Error connecting to server");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDeleteUser = async (user: AdminUser) => {
+    if (!window.confirm(`Delete user "${user.name}" (${user.email || user.id})?`)) return;
+    clearMessages();
+    setIsSubmitting(true);
+    try {
+      const result = await adminDelete(`/api/admin/users/${encodeURIComponent(user.id)}`);
+      if (!result.ok) {
+        setError(result.error || "Failed to delete user");
+        return;
+      }
+      if (editingUserId === user.id) resetUserForm();
+      setSuccessMessage(`User "${user.name}" deleted`);
       await fetchData();
     } catch {
       setError("Error connecting to server");
@@ -158,7 +289,7 @@ export default function SuperAdminPage() {
           <div>
             <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Super Admin</h1>
             <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
-              Manage organisations and view all users
+              Manage organisations and users
             </p>
           </div>
 
@@ -175,18 +306,19 @@ export default function SuperAdminPage() {
 
           <Card className="dark:bg-gray-800">
             <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
-              Add Organisation
+              {editingOrgId ? `Edit Organisation — ${editingOrgId}` : "Add Organisation"}
             </h2>
-            <form onSubmit={handleAddOrganisation} className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <form onSubmit={handleSaveOrganisation} className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <Label htmlFor="id" value="Organisation ID *" />
                 <TextInput
                   id="id"
                   name="id"
                   value={formData.id}
-                  onChange={handleInputChange}
+                  onChange={handleOrgInputChange}
                   placeholder="e.g. 00001"
                   required
+                  disabled={Boolean(editingOrgId)}
                 />
               </div>
               <div>
@@ -195,7 +327,7 @@ export default function SuperAdminPage() {
                   id="name"
                   name="name"
                   value={formData.name}
-                  onChange={handleInputChange}
+                  onChange={handleOrgInputChange}
                   placeholder="Hospital name"
                   required
                 />
@@ -206,7 +338,7 @@ export default function SuperAdminPage() {
                   id="contactPerson"
                   name="contactPerson"
                   value={formData.contactPerson}
-                  onChange={handleInputChange}
+                  onChange={handleOrgInputChange}
                   placeholder="Contact name"
                 />
               </div>
@@ -216,7 +348,7 @@ export default function SuperAdminPage() {
                   id="phoneNo"
                   name="phoneNo"
                   value={formData.phoneNo}
-                  onChange={handleInputChange}
+                  onChange={handleOrgInputChange}
                   placeholder="Phone number"
                 />
               </div>
@@ -226,7 +358,7 @@ export default function SuperAdminPage() {
                   id="address"
                   name="address"
                   value={formData.address}
-                  onChange={handleInputChange}
+                  onChange={handleOrgInputChange}
                   placeholder="Full address"
                 />
               </div>
@@ -236,15 +368,20 @@ export default function SuperAdminPage() {
                   id="hid"
                   name="hid"
                   value={formData.hid}
-                  onChange={handleInputChange}
+                  onChange={handleOrgInputChange}
                   placeholder="10-digit device ID"
                   maxLength={10}
                 />
               </div>
-              <div className="flex items-end">
+              <div className="flex items-end gap-2">
                 <Button type="submit" color="blue" disabled={isSubmitting}>
-                  {isSubmitting ? "Saving…" : "Add Organisation"}
+                  {isSubmitting ? "Saving…" : editingOrgId ? "Update Organisation" : "Add Organisation"}
                 </Button>
+                {editingOrgId && (
+                  <Button type="button" color="gray" onClick={resetOrgForm} disabled={isSubmitting}>
+                    Cancel
+                  </Button>
+                )}
               </div>
             </form>
           </Card>
@@ -268,6 +405,7 @@ export default function SuperAdminPage() {
                       <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Phone</th>
                       <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Address</th>
                       <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">HID</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
@@ -279,6 +417,26 @@ export default function SuperAdminPage() {
                         <td className="px-4 py-2 whitespace-nowrap">{org.phoneNo || "—"}</td>
                         <td className="px-4 py-2">{org.address || "—"}</td>
                         <td className="px-4 py-2 whitespace-nowrap font-mono text-sm">{org.hid || "—"}</td>
+                        <td className="px-4 py-2 whitespace-nowrap">
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => startEditOrg(org)}
+                              className="text-blue-600 hover:text-blue-800 dark:text-blue-400 text-sm font-medium"
+                              disabled={isSubmitting}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteOrg(org)}
+                              className="text-red-600 hover:text-red-800 dark:text-red-400 text-sm font-medium"
+                              disabled={isSubmitting}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -286,6 +444,64 @@ export default function SuperAdminPage() {
               </div>
             )}
           </Card>
+
+          {editingUserId && (
+            <Card className="dark:bg-gray-800">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
+                Edit User — {editingUserId}
+              </h2>
+              <form onSubmit={handleSaveUser} className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <Label htmlFor="user-name" value="Name *" />
+                  <TextInput id="user-name" name="name" value={userForm.name} onChange={handleUserInputChange} required />
+                </div>
+                <div>
+                  <Label htmlFor="user-email" value="Email" />
+                  <TextInput id="user-email" name="email" type="email" value={userForm.email} onChange={handleUserInputChange} />
+                </div>
+                <div>
+                  <Label htmlFor="user-role" value="Role *" />
+                  <Select id="user-role" name="role" value={userForm.role} onChange={handleUserInputChange} required>
+                    {ROLE_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </Select>
+                </div>
+                <div>
+                  <Label htmlFor="user-org" value="Organisation *" />
+                  <Select id="user-org" name="organisationId" value={userForm.organisationId} onChange={handleUserInputChange} required>
+                    <option value="">Select organisation</option>
+                    {organisations.map((org) => (
+                      <option key={org.id} value={org.id}>{org.name} ({org.id})</option>
+                    ))}
+                  </Select>
+                </div>
+                <div className="sm:col-span-2">
+                  <Label htmlFor="user-address" value="Address" />
+                  <TextInput id="user-address" name="address" value={userForm.address} onChange={handleUserInputChange} />
+                </div>
+                <div>
+                  <Label htmlFor="user-password" value="New Password" />
+                  <TextInput
+                    id="user-password"
+                    name="password"
+                    type="password"
+                    value={userForm.password}
+                    onChange={handleUserInputChange}
+                    placeholder="Leave blank to keep current"
+                  />
+                </div>
+                <div className="flex items-end gap-2">
+                  <Button type="submit" color="blue" disabled={isSubmitting}>
+                    {isSubmitting ? "Saving…" : "Update User"}
+                  </Button>
+                  <Button type="button" color="gray" onClick={resetUserForm} disabled={isSubmitting}>
+                    Cancel
+                  </Button>
+                </div>
+              </form>
+            </Card>
+          )}
 
           <Card className="dark:bg-gray-800">
             <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
@@ -307,6 +523,7 @@ export default function SuperAdminPage() {
                       <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Organisation</th>
                       <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Org ID</th>
                       <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Address</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
@@ -329,6 +546,26 @@ export default function SuperAdminPage() {
                         <td className="px-4 py-2 whitespace-nowrap">{user.organisationName || "—"}</td>
                         <td className="px-4 py-2 whitespace-nowrap font-mono text-sm">{user.organisationId || "—"}</td>
                         <td className="px-4 py-2">{user.address || "—"}</td>
+                        <td className="px-4 py-2 whitespace-nowrap">
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => startEditUser(user)}
+                              className="text-blue-600 hover:text-blue-800 dark:text-blue-400 text-sm font-medium"
+                              disabled={isSubmitting}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteUser(user)}
+                              className="text-red-600 hover:text-red-800 dark:text-red-400 text-sm font-medium"
+                              disabled={isSubmitting}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </td>
                       </tr>
                     ))}
                   </tbody>

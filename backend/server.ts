@@ -295,6 +295,72 @@ app.post("/api/admin/organisations", requireSuperAdmin, async (req: Request, res
   }
 });
 
+app.put("/api/admin/organisations/:id", requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { name, address, phoneNo, contactPerson, hid } = req.body;
+    if (!name) {
+      return res.status(400).json({ success: false, error: "name is required" });
+    }
+    const hidStr = hid ? String(hid) : null;
+    if (hidStr && !/^\d{10}$/.test(hidStr)) {
+      return res.status(400).json({ success: false, error: "hid must be a 10-digit number" });
+    }
+    const pool = await getPool();
+    const exists = await pool.request()
+      .input("id", sql.NVarChar(50), id)
+      .query(`SELECT id FROM [${ORGANISATION_TABLE}] WHERE id = @id`);
+    if (!exists.recordset.length) {
+      return res.status(404).json({ success: false, error: "Organisation not found" });
+    }
+    const updateReq = pool.request();
+    updateReq.input("id", sql.NVarChar(50), id);
+    updateReq.input("name", sql.NVarChar(200), name);
+    updateReq.input("address", sql.NVarChar(500), address || null);
+    updateReq.input("phoneNo", sql.NVarChar(50), phoneNo || null);
+    updateReq.input("contactPerson", sql.NVarChar(200), contactPerson || null);
+    updateReq.input("hid", sql.NVarChar(20), hidStr);
+    await updateReq.query(
+      `UPDATE [${ORGANISATION_TABLE}]
+       SET name = @name, address = @address, phoneNo = @phoneNo, contactPerson = @contactPerson, hid = @hid
+       WHERE id = @id`
+    );
+    return res.status(200).json({
+      success: true,
+      data: { id, name, address: address || null, phoneNo: phoneNo || null, contactPerson: contactPerson || null, hid: hidStr },
+    });
+  } catch (err) {
+    console.error("[ADMIN ORGANISATIONS PUT] Error:", err);
+    return res.status(500).json({ success: false, error: "Failed to update organisation" });
+  }
+});
+
+app.delete("/api/admin/organisations/:id", requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const pool = await getPool();
+    const exists = await pool.request()
+      .input("id", sql.NVarChar(50), id)
+      .query(`SELECT id FROM [${ORGANISATION_TABLE}] WHERE id = @id`);
+    if (!exists.recordset.length) {
+      return res.status(404).json({ success: false, error: "Organisation not found" });
+    }
+    const users = await pool.request()
+      .input("organisationId", sql.NVarChar(50), id)
+      .query(`SELECT COUNT(*) AS cnt FROM [${USER_TABLE}] WHERE organisationId = @organisationId`);
+    if (users.recordset[0]?.cnt > 0) {
+      return res.status(409).json({ success: false, error: "Cannot delete organisation with linked users" });
+    }
+    await pool.request()
+      .input("id", sql.NVarChar(50), id)
+      .query(`DELETE FROM [${ORGANISATION_TABLE}] WHERE id = @id`);
+    return res.status(200).json({ success: true, message: "Organisation deleted" });
+  } catch (err) {
+    console.error("[ADMIN ORGANISATIONS DELETE] Error:", err);
+    return res.status(500).json({ success: false, error: "Failed to delete organisation" });
+  }
+});
+
 app.get("/api/admin/users", requireSuperAdmin, async (_req: Request, res: Response) => {
   try {
     const pool = await getPool();
@@ -308,6 +374,89 @@ app.get("/api/admin/users", requireSuperAdmin, async (_req: Request, res: Respon
   } catch (err) {
     console.error("[ADMIN USERS GET] Error:", err);
     return res.status(500).json({ success: false, error: "Failed to fetch users" });
+  }
+});
+
+app.put("/api/admin/users/:id", requireSuperAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { name, email, role, organisationId, address, password } = req.body;
+    if (!name || !role || !organisationId) {
+      return res.status(400).json({ success: false, error: "name, role and organisationId are required" });
+    }
+    const roleNorm = String(role).toLowerCase() === "super_admin"
+      ? "super_admin"
+      : String(role).toLowerCase() === "admin" || String(role).toUpperCase() === "A"
+        ? "admin"
+        : "user";
+    const pool = await getPool();
+    const exists = await pool.request()
+      .input("id", sql.NVarChar(50), id)
+      .query(`SELECT id, role FROM [${USER_TABLE}] WHERE id = @id`);
+    if (!exists.recordset.length) {
+      return res.status(404).json({ success: false, error: "User not found" });
+    }
+    const orgExists = await pool.request()
+      .input("organisationId", sql.NVarChar(50), organisationId)
+      .query(`SELECT id FROM [${ORGANISATION_TABLE}] WHERE id = @organisationId`);
+    if (!orgExists.recordset.length) {
+      return res.status(400).json({ success: false, error: "Organisation not found" });
+    }
+    if (email) {
+      const emailCheck = await pool.request()
+        .input("id", sql.NVarChar(50), id)
+        .input("email", sql.NVarChar(200), email)
+        .query(`SELECT id FROM [${USER_TABLE}] WHERE email = @email AND id <> @id`);
+      if (emailCheck.recordset.length > 0) {
+        return res.status(409).json({ success: false, error: "Email already in use" });
+      }
+    }
+    const updateReq = pool.request();
+    updateReq.input("id", sql.NVarChar(50), id);
+    updateReq.input("name", sql.NVarChar(200), name);
+    updateReq.input("email", sql.NVarChar(200), email || null);
+    updateReq.input("role", sql.VarChar(50), roleNorm);
+    updateReq.input("organisationId", sql.NVarChar(50), organisationId);
+    updateReq.input("address", sql.NVarChar(500), address || null);
+    let updateQuery = `UPDATE [${USER_TABLE}]
+       SET name = @name, email = @email, role = @role, organisationId = @organisationId, address = @address`;
+    if (password) {
+      const hashed = await bcrypt.hash(password, 10);
+      updateReq.input("password", sql.NVarChar(200), hashed);
+      updateQuery += `, password = @password`;
+    }
+    updateQuery += ` WHERE id = @id`;
+    await updateReq.query(updateQuery);
+    return res.status(200).json({
+      success: true,
+      data: { id, name, email: email || null, role: roleNorm, organisationId, address: address || null },
+    });
+  } catch (err) {
+    console.error("[ADMIN USERS PUT] Error:", err);
+    return res.status(500).json({ success: false, error: "Failed to update user" });
+  }
+});
+
+app.delete("/api/admin/users/:id", requireSuperAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    if (req.authUser?.id === id) {
+      return res.status(400).json({ success: false, error: "Cannot delete your own account" });
+    }
+    const pool = await getPool();
+    const exists = await pool.request()
+      .input("id", sql.NVarChar(50), id)
+      .query(`SELECT id FROM [${USER_TABLE}] WHERE id = @id`);
+    if (!exists.recordset.length) {
+      return res.status(404).json({ success: false, error: "User not found" });
+    }
+    await pool.request()
+      .input("id", sql.NVarChar(50), id)
+      .query(`DELETE FROM [${USER_TABLE}] WHERE id = @id`);
+    return res.status(200).json({ success: true, message: "User deleted" });
+  } catch (err) {
+    console.error("[ADMIN USERS DELETE] Error:", err);
+    return res.status(500).json({ success: false, error: "Failed to delete user" });
   }
 });
 
