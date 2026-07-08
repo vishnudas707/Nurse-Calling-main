@@ -9,12 +9,14 @@ export type ApiResult<T = unknown> = {
   error?: string;
 };
 
+type ApiPayload = { success?: boolean; error?: string };
+
 async function parseResponse<T>(resp: Response): Promise<ApiResult<T>> {
   const text = await resp.text();
-  let data: T & { success?: boolean; error?: string } = {} as T;
+  let data = {} as T & ApiPayload;
   if (text) {
     try {
-      data = JSON.parse(text);
+      data = JSON.parse(text) as T & ApiPayload;
     } catch {
       return {
         ok: false,
@@ -29,7 +31,7 @@ async function parseResponse<T>(resp: Response): Promise<ApiResult<T>> {
     : data.success === false
       ? data.error || "Request failed"
       : undefined;
-  return { ok: resp.ok && data.success !== false, status: resp.status, data, error };
+  return { ok: resp.ok && data.success !== false, status: resp.status, data: data as T, error };
 }
 
 export async function adminGet<T>(path: string): Promise<ApiResult<T>> {

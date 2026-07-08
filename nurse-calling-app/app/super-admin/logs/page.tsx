@@ -1,12 +1,10 @@
 "use client";
 
-import TopNavBar from "../../components/navbar";
 import { Card, Spinner, Select, TextInput, Pagination } from "flowbite-react";
-import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import { getAuthToken, isSuperAdmin } from "../../lib/auth";
 import { adminGet } from "../../lib/admin-api";
+import AlertMessages from "../components/AlertMessages";
+import SuperAdminShell from "../components/SuperAdminShell";
 
 type ActivityLog = {
   id: string;
@@ -50,7 +48,6 @@ const actionBadgeClass = (action: string) => {
 };
 
 export default function SuperAdminLogsPage() {
-  const router = useRouter();
   const [logs, setLogs] = useState<ActivityLog[]>([]);
   const [organisations, setOrganisations] = useState<Organisation[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -99,16 +96,11 @@ export default function SuperAdminLogsPage() {
   }, [page, orgFilter, actionFilter, search, startDate, endDate]);
 
   useEffect(() => {
-    if (!getAuthToken() || !isSuperAdmin()) {
-      router.replace("/login");
-      return;
-    }
     adminGet<{ success: boolean; data: Organisation[] }>("/api/admin/organisations")
       .then((r) => { if (r.ok) setOrganisations(r.data.data || []); });
-  }, [router]);
+  }, []);
 
   useEffect(() => {
-    if (!isSuperAdmin()) return;
     const load = async () => {
       setIsLoading(true);
       await fetchLogs();
@@ -118,32 +110,14 @@ export default function SuperAdminLogsPage() {
   }, [fetchLogs]);
 
   return (
-    <div className="min-h-screen bg-white dark:bg-gray-900">
-      <TopNavBar />
-      <div className="px-4 py-12 sm:px-6 lg:px-8">
-        <div className="mx-auto max-w-7xl space-y-6">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Activity Log</h1>
-              <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
-                All organisations — super admin only
-              </p>
-            </div>
-            <Link
-              href="/super-admin"
-              className="text-sm text-blue-600 hover:underline dark:text-blue-400"
-            >
-              ← Back to Super Admin
-            </Link>
-          </div>
+    <SuperAdminShell
+      title="Activity Log"
+      description="All organisations — super admin only"
+    >
+      <div className="space-y-6">
+        <AlertMessages error={error} />
 
-          {error && (
-            <div className="rounded-lg bg-red-50 p-4 text-sm text-red-800 dark:bg-red-900 dark:text-red-200">
-              {error}
-            </div>
-          )}
-
-          <Card className="dark:bg-gray-800">
+        <Card className="dark:bg-gray-800">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
               <Select value={orgFilter} onChange={(e) => { setOrgFilter(e.target.value); setPage(1); }}>
                 <option value="">All organisations</option>
@@ -229,8 +203,7 @@ export default function SuperAdminLogsPage() {
               </div>
             )}
           </Card>
-        </div>
       </div>
-    </div>
+    </SuperAdminShell>
   );
 }

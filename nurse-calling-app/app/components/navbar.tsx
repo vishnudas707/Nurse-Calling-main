@@ -23,7 +23,7 @@ export default function TopNavBar() {
     <nav className="border-b border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
       <div className="flex items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
         {/* Brand */}
-        <Link href={showSuperAdmin ? "/super-admin" : "/dashboard"} className="flex items-center">
+        <Link href={showSuperAdmin ? "/super-admin/organisations" : "/dashboard"} className="flex items-center">
           <span className="whitespace-nowrap text-2xl font-semibold text-gray-900 dark:text-white">
             Care Call
           </span>
@@ -35,10 +35,18 @@ export default function TopNavBar() {
             <>
               <li>
                 <Link
-                  href="/super-admin"
+                  href="/super-admin/organisations"
                   className="text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white"
                 >
-                  Super Admin
+                  Organisations
+                </Link>
+              </li>
+              <li>
+                <Link
+                  href="/super-admin/users"
+                  className="text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white"
+                >
+                  Users
                 </Link>
               </li>
               <li>

@@ -58,5 +58,5 @@ export function authHeaders(): Record<string, string> {
 }
 
 export function getPostLoginPath(role?: string): string {
-  return role === SUPER_ADMIN_ROLE ? "/super-admin" : "/dashboard";
+  return role === SUPER_ADMIN_ROLE ? "/super-admin/organisations" : "/dashboard";
 }
