@@ -6,7 +6,7 @@ import TopNavBar from "../components/navbar";
 import { Card } from "flowbite-react";
 import { getOrganisationId } from "../lib/auth";
 import { getCallTypeName, MISCELLANEOUS_CALL_TYPE } from "../lib/constants";
-import { getCallStateLabel, isCallActive } from "../reports/lib/report-utils";
+import { getCallStateLabel, isCallActive, toDayKey } from "../reports/lib/report-utils";
 
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { io, Socket } from "socket.io-client";
@@ -157,12 +157,12 @@ function saveClearedCallIds(orgId: string | null, ids: Set<string>) {
   
     // Dynamic stats
     const now = new Date();
-    const todayStr = now.toISOString().slice(0, 10);
+    const todayStr = toDayKey(now);
     const totalCalls = visibleActiveCalls.length;
     const pendingCalls = visibleActiveCalls.filter(c => !c.muted).length;
     const resolvedToday = todayHistory.filter(c => {
       if (isCallActive(c) || !c.dateTimeReset) return false;
-      return new Date(c.dateTimeReset).toISOString().slice(0, 10) === todayStr;
+      return toDayKey(c.dateTimeReset) === todayStr;
     }).length;
     const responseTimes = todayHistory
       .filter(c => !isCallActive(c) && c.timestamp && c.dateTimeReset)
@@ -253,8 +253,22 @@ function saveClearedCallIds(orgId: string | null, ids: Set<string>) {
       };
       fetchActiveCalls();
   
-      const todayStart = `${todayStr}T00:00:00`;
-      const todayEnd = `${todayStr}T23:59:59`;
+      const fetchTodayHistory = async () => {
+        const day = toDayKey(new Date());
+        const todayStart = `${day}T00:00:00`;
+        const todayEnd = `${day}T23:59:59`;
+        try {
+          const resp = await fetch(
+            `${API_BASE}/api/calls/history${orgQuery ? orgQuery + "&" : "?"}startDate=${encodeURIComponent(todayStart)}&endDate=${encodeURIComponent(todayEnd)}&page=1&pageSize=10000`
+          );
+          const data = await resp.json();
+          if (resp.ok && data.success) {
+            setTodayHistory((data.data || []).filter((c: { callType?: number }) => c.callType !== MISCELLANEOUS_CALL_TYPE));
+          }
+        } catch (err) {
+          console.error("Error fetching today history", err);
+        }
+      };
 
       const fetchRecentHistory = async () => {
         try {
@@ -267,20 +281,6 @@ function saveClearedCallIds(orgId: string | null, ids: Set<string>) {
           }
         } catch (err) {
           console.error("Error fetching recent history", err);
-        }
-      };
-
-      const fetchTodayHistory = async () => {
-        try {
-          const resp = await fetch(
-            `${API_BASE}/api/calls/history${orgQuery ? orgQuery + "&" : "?"}startDate=${encodeURIComponent(todayStart)}&endDate=${encodeURIComponent(todayEnd)}&page=1&pageSize=10000`
-          );
-          const data = await resp.json();
-          if (resp.ok && data.success) {
-            setTodayHistory((data.data || []).filter((c: { callType?: number }) => c.callType !== MISCELLANEOUS_CALL_TYPE));
-          }
-        } catch (err) {
-          console.error("Error fetching today history", err);
         }
       };
 

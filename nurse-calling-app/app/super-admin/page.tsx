@@ -2,6 +2,7 @@
 
 import TopNavBar from "../components/navbar";
 import { Card, Spinner, TextInput, Label, Button, Select } from "flowbite-react";
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -291,6 +292,12 @@ export default function SuperAdminPage() {
             <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
               Manage organisations and users
             </p>
+            <Link
+              href="/super-admin/logs"
+              className="mt-2 inline-block text-sm text-blue-600 hover:underline dark:text-blue-400"
+            >
+              View Activity Log →
+            </Link>
           </div>
 
           {error && (

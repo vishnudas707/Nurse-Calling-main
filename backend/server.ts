@@ -19,6 +19,7 @@ import {
   withCallTypeFields,
   MISCELLANEOUS_CALL_TYPE,
   isCallRecordActive,
+  getCallTypeName,
 } from "./constants";
 
 dotenv.config();
@@ -62,6 +63,71 @@ const PORT = process.env.PORT || 5001;
 // IMPORTANT: This service user may not have DDL permissions in production.
 // So we only *use* CallRepeat table if it already exists.
 let callRepeatTableCache: boolean | null = null;
+let activityLogTableCache: boolean | null = null;
+const ACTIVITY_LOG_TABLE = "ActivityLog";
+
+type ActivityLogInput = {
+  organisationId?: string | null;
+  organisationName?: string | null;
+  action: string;
+  entityType?: string;
+  entityId?: string;
+  message: string;
+  actorId?: string | null;
+  actorName?: string | null;
+  details?: Record<string, unknown>;
+};
+
+async function hasActivityLogTable(pool: Awaited<ReturnType<typeof getPool>>): Promise<boolean> {
+  if (activityLogTableCache !== null) return activityLogTableCache;
+  try {
+    const r = await pool.request().query(`SELECT OBJECT_ID(N'[dbo].[ActivityLog]', N'U') AS objId`);
+    activityLogTableCache = !!r?.recordset?.[0]?.objId;
+    return activityLogTableCache;
+  } catch {
+    activityLogTableCache = false;
+    return false;
+  }
+}
+
+async function getOrganisationName(pool: Awaited<ReturnType<typeof getPool>>, orgId?: string | null) {
+  if (!orgId) return null;
+  try {
+    const r = await pool.request()
+      .input("id", sql.NVarChar(50), orgId)
+      .query(`SELECT name FROM [${ORGANISATION_TABLE}] WHERE id = @id`);
+    return r.recordset[0]?.name || orgId;
+  } catch {
+    return orgId;
+  }
+}
+
+async function writeActivityLog(pool: Awaited<ReturnType<typeof getPool>>, entry: ActivityLogInput) {
+  if (!(await hasActivityLogTable(pool))) return;
+  try {
+    const orgName = entry.organisationName ?? (entry.organisationId ? await getOrganisationName(pool, entry.organisationId) : null);
+    const id = `LOG_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+    const insertReq = pool.request();
+    insertReq.input("id", sql.NVarChar(50), id);
+    insertReq.input("organisationId", sql.NVarChar(50), entry.organisationId || null);
+    insertReq.input("organisationName", sql.NVarChar(200), orgName || null);
+    insertReq.input("action", sql.NVarChar(100), entry.action);
+    insertReq.input("entityType", sql.NVarChar(50), entry.entityType || null);
+    insertReq.input("entityId", sql.NVarChar(50), entry.entityId || null);
+    insertReq.input("message", sql.NVarChar(1000), entry.message.slice(0, 1000));
+    insertReq.input("actorId", sql.NVarChar(50), entry.actorId || null);
+    insertReq.input("actorName", sql.NVarChar(200), entry.actorName || null);
+    insertReq.input("details", sql.NVarChar(sql.MAX), entry.details ? JSON.stringify(entry.details) : null);
+    insertReq.input("createdAt", sql.DateTime, new Date());
+    await insertReq.query(
+      `INSERT INTO [${ACTIVITY_LOG_TABLE}]
+       (id, organisationId, organisationName, action, entityType, entityId, message, actorId, actorName, details, createdAt)
+       VALUES (@id, @organisationId, @organisationName, @action, @entityType, @entityId, @message, @actorId, @actorName, @details, @createdAt)`
+    );
+  } catch (err) {
+    console.error("[ActivityLog] write failed:", err);
+  }
+}
 
 async function hasCallRepeatTable(pool: any): Promise<boolean> {
   if (callRepeatTableCache !== null) return callRepeatTableCache;
@@ -236,6 +302,16 @@ app.post("/api/auth/login", async (req: Request, res: Response) => {
 
     const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '8h' });
 
+    await writeActivityLog(pool, {
+      organisationId: user.organisationId,
+      action: "auth.login",
+      entityType: "user",
+      entityId: user.id,
+      message: `User logged in: ${user.email || user.name}`,
+      actorId: user.id,
+      actorName: user.name,
+    });
+
     return res.status(200).json({ success: true, user: { id: user.id, name: user.name, email: user.email, role: user.role, organisationId: user.organisationId }, token });
   } catch (err) {
     console.error(err);
@@ -257,7 +333,7 @@ app.get("/api/admin/organisations", requireSuperAdmin, async (_req: Request, res
   }
 });
 
-app.post("/api/admin/organisations", requireSuperAdmin, async (req: Request, res: Response) => {
+app.post("/api/admin/organisations", requireSuperAdmin, async (req: AuthRequest, res: Response) => {
   try {
     const { id, name, address, phoneNo, contactPerson, hid } = req.body;
     if (!id || !name) {
@@ -285,6 +361,16 @@ app.post("/api/admin/organisations", requireSuperAdmin, async (req: Request, res
       `INSERT INTO [${ORGANISATION_TABLE}] (id, name, address, phoneNo, contactPerson, hid)
        VALUES (@id, @name, @address, @phoneNo, @contactPerson, @hid)`
     );
+    await writeActivityLog(pool, {
+      organisationId: id,
+      organisationName: name,
+      action: "organisation.created",
+      entityType: "organisation",
+      entityId: id,
+      message: `Organisation created: ${name}`,
+      actorId: req.authUser?.id,
+      actorName: "Super Admin",
+    });
     return res.status(201).json({
       success: true,
       data: { id, name, address: address || null, phoneNo: phoneNo || null, contactPerson: contactPerson || null, hid: hidStr },
@@ -295,7 +381,7 @@ app.post("/api/admin/organisations", requireSuperAdmin, async (req: Request, res
   }
 });
 
-app.put("/api/admin/organisations/:id", requireSuperAdmin, async (req: Request, res: Response) => {
+app.put("/api/admin/organisations/:id", requireSuperAdmin, async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
     const { name, address, phoneNo, contactPerson, hid } = req.body;
@@ -325,6 +411,16 @@ app.put("/api/admin/organisations/:id", requireSuperAdmin, async (req: Request, 
        SET name = @name, address = @address, phoneNo = @phoneNo, contactPerson = @contactPerson, hid = @hid
        WHERE id = @id`
     );
+    await writeActivityLog(pool, {
+      organisationId: id,
+      organisationName: name,
+      action: "organisation.updated",
+      entityType: "organisation",
+      entityId: id,
+      message: `Organisation updated: ${name}`,
+      actorId: req.authUser?.id,
+      actorName: "Super Admin",
+    });
     return res.status(200).json({
       success: true,
       data: { id, name, address: address || null, phoneNo: phoneNo || null, contactPerson: contactPerson || null, hid: hidStr },
@@ -335,16 +431,17 @@ app.put("/api/admin/organisations/:id", requireSuperAdmin, async (req: Request, 
   }
 });
 
-app.delete("/api/admin/organisations/:id", requireSuperAdmin, async (req: Request, res: Response) => {
+app.delete("/api/admin/organisations/:id", requireSuperAdmin, async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
     const pool = await getPool();
     const exists = await pool.request()
       .input("id", sql.NVarChar(50), id)
-      .query(`SELECT id FROM [${ORGANISATION_TABLE}] WHERE id = @id`);
+      .query(`SELECT id, name FROM [${ORGANISATION_TABLE}] WHERE id = @id`);
     if (!exists.recordset.length) {
       return res.status(404).json({ success: false, error: "Organisation not found" });
     }
+    const orgName = exists.recordset[0].name;
     const users = await pool.request()
       .input("organisationId", sql.NVarChar(50), id)
       .query(`SELECT COUNT(*) AS cnt FROM [${USER_TABLE}] WHERE organisationId = @organisationId`);
@@ -354,6 +451,16 @@ app.delete("/api/admin/organisations/:id", requireSuperAdmin, async (req: Reques
     await pool.request()
       .input("id", sql.NVarChar(50), id)
       .query(`DELETE FROM [${ORGANISATION_TABLE}] WHERE id = @id`);
+    await writeActivityLog(pool, {
+      organisationId: id,
+      organisationName: orgName,
+      action: "organisation.deleted",
+      entityType: "organisation",
+      entityId: id,
+      message: `Organisation deleted: ${orgName}`,
+      actorId: req.authUser?.id,
+      actorName: "Super Admin",
+    });
     return res.status(200).json({ success: true, message: "Organisation deleted" });
   } catch (err) {
     console.error("[ADMIN ORGANISATIONS DELETE] Error:", err);
@@ -427,6 +534,16 @@ app.put("/api/admin/users/:id", requireSuperAdmin, async (req: AuthRequest, res:
     }
     updateQuery += ` WHERE id = @id`;
     await updateReq.query(updateQuery);
+    await writeActivityLog(pool, {
+      organisationId,
+      action: "user.updated",
+      entityType: "user",
+      entityId: id,
+      message: `User updated: ${name} (${roleNorm})`,
+      actorId: req.authUser?.id,
+      actorName: "Super Admin",
+      details: { email, organisationId, role: roleNorm },
+    });
     return res.status(200).json({
       success: true,
       data: { id, name, email: email || null, role: roleNorm, organisationId, address: address || null },
@@ -446,17 +563,95 @@ app.delete("/api/admin/users/:id", requireSuperAdmin, async (req: AuthRequest, r
     const pool = await getPool();
     const exists = await pool.request()
       .input("id", sql.NVarChar(50), id)
-      .query(`SELECT id FROM [${USER_TABLE}] WHERE id = @id`);
+      .query(`SELECT u.id, u.name, u.organisationId, o.name AS organisationName FROM [${USER_TABLE}] u LEFT JOIN [${ORGANISATION_TABLE}] o ON u.organisationId = o.id WHERE u.id = @id`);
     if (!exists.recordset.length) {
       return res.status(404).json({ success: false, error: "User not found" });
     }
+    const deletedUser = exists.recordset[0];
     await pool.request()
       .input("id", sql.NVarChar(50), id)
       .query(`DELETE FROM [${USER_TABLE}] WHERE id = @id`);
+    await writeActivityLog(pool, {
+      organisationId: deletedUser.organisationId,
+      organisationName: deletedUser.organisationName,
+      action: "user.deleted",
+      entityType: "user",
+      entityId: id,
+      message: `User deleted: ${deletedUser.name}`,
+      actorId: req.authUser?.id,
+      actorName: "Super Admin",
+    });
     return res.status(200).json({ success: true, message: "User deleted" });
   } catch (err) {
     console.error("[ADMIN USERS DELETE] Error:", err);
     return res.status(500).json({ success: false, error: "Failed to delete user" });
+  }
+});
+
+// Super admin — activity log (all organisations)
+app.get("/api/admin/logs", requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const { organisationId, action, startDate, endDate, search, page = 1, pageSize = 50 } = req.query;
+    const pool = await getPool();
+    if (!(await hasActivityLogTable(pool))) {
+      return res.status(503).json({
+        success: false,
+        error: "ActivityLog table missing. Run backend/migrations/add-activity-log.sql",
+        data: [],
+        totalCount: 0,
+        totalPages: 0,
+      });
+    }
+    const where: string[] = [];
+    const params: { name: string; type: any; value: unknown }[] = [];
+    if (organisationId) {
+      where.push("organisationId = @organisationId");
+      params.push({ name: "organisationId", type: sql.NVarChar(50), value: String(organisationId) });
+    }
+    if (action) {
+      where.push("action = @action");
+      params.push({ name: "action", type: sql.NVarChar(100), value: String(action) });
+    }
+    if (startDate) {
+      where.push("createdAt >= @startDate");
+      params.push({ name: "startDate", type: sql.DateTime, value: new Date(String(startDate)) });
+    }
+    if (endDate) {
+      where.push("createdAt <= @endDate");
+      params.push({ name: "endDate", type: sql.DateTime, value: new Date(String(endDate)) });
+    }
+    if (search) {
+      where.push("(message LIKE @search OR organisationName LIKE @search OR entityId LIKE @search)");
+      params.push({ name: "search", type: sql.NVarChar, value: `%${search}%` });
+    }
+    const whereClause = where.length ? ` WHERE ${where.join(" AND ")}` : "";
+    const countReq = pool.request();
+    const dataReq = pool.request();
+    params.forEach((p) => {
+      countReq.input(p.name, p.type, p.value);
+      dataReq.input(p.name, p.type, p.value);
+    });
+    const countResult = await countReq.query(`SELECT COUNT(*) AS total FROM [${ACTIVITY_LOG_TABLE}]${whereClause}`);
+    const totalCount = countResult.recordset[0]?.total || 0;
+    const totalPages = Math.ceil(totalCount / Number(pageSize));
+    const offset = (Number(page) - 1) * Number(pageSize);
+    const result = await dataReq.query(
+      `SELECT id, organisationId, organisationName, action, entityType, entityId, message, actorId, actorName, details, createdAt
+       FROM [${ACTIVITY_LOG_TABLE}]${whereClause}
+       ORDER BY createdAt DESC
+       OFFSET ${offset} ROWS FETCH NEXT ${Number(pageSize)} ROWS ONLY`
+    );
+    return res.status(200).json({
+      success: true,
+      data: result.recordset,
+      totalCount,
+      totalPages,
+      page: Number(page),
+      pageSize: Number(pageSize),
+    });
+  } catch (err) {
+    console.error("[ADMIN LOGS GET] Error:", err);
+    return res.status(500).json({ success: false, error: "Failed to fetch activity logs" });
   }
 });
 
@@ -580,6 +775,15 @@ app.post("/api/rooms", async (req: Request, res: Response) => {
 
     console.log('[ROOMS POST] Room created with ID:', roomId);
 
+    await writeActivityLog(pool, {
+      organisationId,
+      action: "room.created",
+      entityType: "room",
+      entityId: roomId,
+      message: `Room created: ${roomName}`,
+      details: { roomNo_deviceNo, floor, roomType, departmentType },
+    });
+
     return res.status(201).json({
       success: true,
       data: { id: roomId, organisationId, roomName, roomNo_deviceNo, roomType, departmentType, active: 1 },
@@ -625,6 +829,15 @@ app.put("/api/rooms/:id", async (req: Request, res: Response) => {
     
     await updateReq.query(updateQuery);
 
+    await writeActivityLog(pool, {
+      organisationId,
+      action: "room.updated",
+      entityType: "room",
+      entityId: id,
+      message: `Room updated: ${roomName}`,
+      details: { roomNo_deviceNo, floor, roomType, departmentType },
+    });
+
     return res.status(200).json({
       success: true,
       data: { id, organisationId, roomName, roomNo_deviceNo, roomType, departmentType, active },
@@ -644,16 +857,25 @@ app.delete("/api/rooms/:id", async (req: Request, res: Response) => {
     // Check if room exists
     const checkReq = pool.request();
     checkReq.input('id', sql.NVarChar(50), id);
-    const existsResult = await checkReq.query(`SELECT id FROM [${ROOM_TABLE}] WHERE id = @id`);
+    const existsResult = await checkReq.query(`SELECT id, roomName, organisationId FROM [${ROOM_TABLE}] WHERE id = @id`);
     
     if (existsResult.recordset.length === 0) {
       return res.status(404).json({ success: false, error: "Room not found" });
     }
+    const deletedRoom = existsResult.recordset[0];
 
     const deleteReq = pool.request();
     deleteReq.input('id', sql.NVarChar(50), id);
     
     await deleteReq.query(`UPDATE [${ROOM_TABLE}] SET active = 0 WHERE id = @id`);
+
+    await writeActivityLog(pool, {
+      organisationId: deletedRoom.organisationId,
+      action: "room.deleted",
+      entityType: "room",
+      entityId: id,
+      message: `Room deleted: ${deletedRoom.roomName}`,
+    });
 
     return res.status(200).json({
       success: true,
@@ -801,6 +1023,14 @@ app.post("/api/calls", async (req: Request, res: Response) => {
     }));
 
     io.to(`org_${organisationId}`).emit("call:new", newCall);
+    await writeActivityLog(pool, {
+      organisationId,
+      action: "call.created",
+      entityType: "call",
+      entityId: callId,
+      message: `Call created: ${roomName} (${getCallTypeName(currentStatus)})`,
+      details: { roomId, status: currentStatus },
+    });
     return res.status(201).json({ success: true, data: newCall });
   } catch (err) {
     console.error('[CALLS POST] Error:', err);
@@ -1095,6 +1325,15 @@ async function processCallStatusForRoom(
       minutesAgo: 0
     })));
 
+    await writeActivityLog(pool, {
+      organisationId: orgId,
+      action: "call.repeated",
+      entityType: "call",
+      entityId: existing.id,
+      message: `Repeated call: ${roomName}`,
+      details: { roomId, dnum, floor },
+    });
+
     return {
       httpStatus: 200,
       result: "SUCCESS",
@@ -1113,6 +1352,14 @@ async function processCallStatusForRoom(
       .input('dateTimeReset', sql.DateTime, new Date())
       .query(`UPDATE [CallStatus] SET currentStatus = @currentStatus, dateTimeReset = @dateTimeReset WHERE id = @id`);
     io.to(`org_${orgId}`).emit("call:status", { id: callId, status: 0 });
+    await writeActivityLog(pool, {
+      organisationId: orgId,
+      action: "call.resolved",
+      entityType: "call",
+      entityId: callId,
+      message: `Call resolved: room ${dnum} (floor ${floor})`,
+      details: { roomId, dnum, floor },
+    });
     return { httpStatus: 200, result: "SUCCESS", message: `Room ${dnum}: call status reset` };
   }
   if (!isActivate && !isReset) {
@@ -1145,6 +1392,14 @@ async function processCallStatusForRoom(
     dateTimeReset: isActivate ? null : now,
     minutesAgo: 0
   })));
+  await writeActivityLog(pool, {
+    organisationId: orgId,
+    action: "call.created",
+    entityType: "call",
+    entityId: callId,
+    message: `Device call: ${roomName} — ${getCallTypeName(statusNumber)}`,
+    details: { roomId, dnum, floor, status: statusNumber },
+  });
   return { httpStatus: 200, result: "SUCCESS", message: `Room ${dnum}: new call inserted (status ${statusNumber})` };
 }
 

@@ -32,14 +32,24 @@ export default function TopNavBar() {
         {/* Center Nav Links */}
         <ul className="flex items-center gap-8">
           {showSuperAdmin ? (
-            <li>
-              <Link
-                href="/super-admin"
-                className="text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white"
-              >
-                Super Admin
-              </Link>
-            </li>
+            <>
+              <li>
+                <Link
+                  href="/super-admin"
+                  className="text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white"
+                >
+                  Super Admin
+                </Link>
+              </li>
+              <li>
+                <Link
+                  href="/super-admin/logs"
+                  className="text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white"
+                >
+                  Activity Log
+                </Link>
+              </li>
+            </>
           ) : (
             <>
               <li>
