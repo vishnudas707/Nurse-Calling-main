@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { buildHistoryQueryParams, callsHistoryUrl, fetchRoomsCached, type CallRecord, type ReportFilterParams } from "../lib/report-utils";
+import { buildHistoryQueryParams, callsHistoryUrl, fetchRoomsCached, sortCallsForReportTable, type CallRecord, type ReportFilterParams } from "../lib/report-utils";
 
 export function useReportCalls(filters: ReportFilterParams) {
   const [allCalls, setAllCalls] = useState<CallRecord[]>([]);
@@ -31,7 +31,7 @@ export function useReportCalls(filters: ReportFilterParams) {
         const callsResp = await fetch(callsHistoryUrl(query), { signal: ac.signal });
         const callsData = await callsResp.json();
         if (callsResp.ok && callsData.success) {
-          setAllCalls(callsData.data || []);
+          setAllCalls(sortCallsForReportTable(callsData.data || []));
         } else {
           setError("Failed to fetch data");
         }

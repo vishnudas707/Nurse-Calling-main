@@ -13,6 +13,7 @@ import {
   buildCallsHistoryParams,
   getCallStateLabel,
   isCallActive,
+  sortCallsForReportTable,
 } from "./lib/report-utils";
 
 const PAGE_SIZE_ALL = 100000;
@@ -107,7 +108,7 @@ export default function ReportsPage() {
     return () => ac.abort();
   }, [startDate, endDate, debouncedSearch, statusFilter, roomFilter, mutedFilter, page, apiPageSize]);
 
-  const paginatedCalls = calls;
+  const paginatedCalls = sortCallsForReportTable(calls);
   const rangeStart = totalCount === 0 ? 0 : (page - 1) * apiPageSize + 1;
   const rangeEnd = Math.min(page * apiPageSize, totalCount);
   const showPagination = pageSizeOption !== "all" && totalPages > 1;
@@ -127,7 +128,7 @@ export default function ReportsPage() {
   const exportExcel = async () => {
     const XLSX = await import("xlsx");
     const { saveAs } = await import("file-saver");
-    const ws = XLSX.utils.json_to_sheet(calls.map(call => ({
+    const ws = XLSX.utils.json_to_sheet(paginatedCalls.map(call => ({
       "Room": call.roomName,
       "Department": getDepartmentTypeName(Number(call.departmentType)),
       "Floor": call.floor || '',
@@ -155,7 +156,7 @@ export default function ReportsPage() {
     autoTable(doc, {
       startY: 22,
       head: [["Room", "Department", "Floor", "Call Type", "Status", "Muted", "Created", "Muted At", "Reset At", "Repeat Count", "Last Repeat At", "Repeat Duration (min)"]],
-      body: calls.map(call => [
+      body: paginatedCalls.map(call => [
         call.roomName,
         getDepartmentTypeName(Number(call.departmentType)),
         call.floor || '',

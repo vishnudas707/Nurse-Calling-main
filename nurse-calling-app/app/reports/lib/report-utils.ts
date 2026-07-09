@@ -100,6 +100,25 @@ export function getLagMinutes(call: CallRecord) {
   return Math.max(0, Math.floor((end - start) / 60000));
 }
 
+export function getCallReportSortTime(call: CallRecord) {
+  const candidates = [call?.timestamp, call?.dateTimeReset, call?.lastRepeatAt];
+  let max = 0;
+  for (const value of candidates) {
+    if (!value) continue;
+    const time = new Date(value as string).getTime();
+    if (!Number.isNaN(time) && time > max) max = time;
+  }
+  return max;
+}
+
+export function sortCallsForReportTable(calls: CallRecord[]) {
+  return [...calls].sort((a, b) => {
+    const diff = getCallReportSortTime(b) - getCallReportSortTime(a);
+    if (diff !== 0) return diff;
+    return String(b?.id ?? "").localeCompare(String(a?.id ?? ""));
+  });
+}
+
 export type ReportFilterParams = {
   startDate?: string;
   endDate?: string;

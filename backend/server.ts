@@ -1165,7 +1165,9 @@ app.get("/api/calls/history", async (req: Request, res: Response) => {
     if (where.length > 0) {
       query += ' WHERE ' + where.join(' AND ');
     }
-    query += ' ORDER BY cs.[dateTime] DESC';
+    query += repeatEnabled
+      ? ` ORDER BY (SELECT MAX(dt) FROM (VALUES (cs.[dateTime]), (cs.[dateTimeReset]), (cr.[lastRepeatAt])) AS T(dt)) DESC, cs.[dateTime] DESC`
+      : ` ORDER BY (SELECT MAX(dt) FROM (VALUES (cs.[dateTime]), (cs.[dateTimeReset])) AS T(dt)) DESC, cs.[dateTime] DESC`;
     // Get total count for pagination
     let countQuery = 'SELECT COUNT(*) as total FROM [CallStatus] cs LEFT JOIN [Room] r ON cs.[roomId] = r.[id]';
     if (where.length > 0) {
