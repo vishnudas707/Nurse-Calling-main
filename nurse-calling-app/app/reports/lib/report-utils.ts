@@ -52,8 +52,10 @@ export function buildCallsHistoryParams(
   pageSize: number
 ) {
   const params: string[] = [];
-  if (filters.startDate) params.push(`startDate=${encodeURIComponent(filters.startDate)}`);
-  if (filters.endDate) params.push(`endDate=${encodeURIComponent(filters.endDate)}`);
+  const normalizedStartDate = normalizeDateFilter(filters.startDate, "start");
+  const normalizedEndDate = normalizeDateFilter(filters.endDate, "end");
+  if (normalizedStartDate) params.push(`startDate=${encodeURIComponent(normalizedStartDate)}`);
+  if (normalizedEndDate) params.push(`endDate=${encodeURIComponent(normalizedEndDate)}`);
   if (filters.search) params.push(`search=${encodeURIComponent(filters.search)}`);
   if (filters.statusFilter) params.push(`status=${encodeURIComponent(filters.statusFilter)}`);
   if (filters.roomFilter) params.push(`room=${encodeURIComponent(filters.roomFilter)}`);
@@ -61,6 +63,13 @@ export function buildCallsHistoryParams(
   params.push(`page=${page}`);
   params.push(`pageSize=${pageSize}`);
   return params.join("&");
+}
+
+function normalizeDateFilter(value: string | undefined, mode: "start" | "end") {
+  if (!value) return "";
+  const trimmed = value.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+  return mode === "start" ? `${trimmed}T00:00:00.000` : `${trimmed}T23:59:59.999`;
 }
 
 export function toDayKey(value: unknown) {
@@ -102,8 +111,10 @@ export type ReportFilterParams = {
 
 export function buildHistoryQueryParams(filters: ReportFilterParams, page = 1, pageSize = 100000) {
   const params: string[] = [];
-  if (filters.startDate) params.push(`startDate=${encodeURIComponent(filters.startDate)}`);
-  if (filters.endDate) params.push(`endDate=${encodeURIComponent(filters.endDate)}`);
+  const normalizedStartDate = normalizeDateFilter(filters.startDate, "start");
+  const normalizedEndDate = normalizeDateFilter(filters.endDate, "end");
+  if (normalizedStartDate) params.push(`startDate=${encodeURIComponent(normalizedStartDate)}`);
+  if (normalizedEndDate) params.push(`endDate=${encodeURIComponent(normalizedEndDate)}`);
   if (filters.search) params.push(`search=${encodeURIComponent(filters.search)}`);
   if (filters.statusFilter) params.push(`status=${encodeURIComponent(filters.statusFilter)}`);
   if (filters.roomFilter) params.push(`room=${encodeURIComponent(filters.roomFilter)}`);
