@@ -1105,7 +1105,7 @@ app.put("/api/calls/:id", async (req: Request, res: Response) => {
 // Get all call history for report
 app.get("/api/calls/history", async (req: Request, res: Response) => {
   try {
-    const { startDate, endDate, search, status, room, muted, organisationId, page = 1, pageSize = 10 } = req.query;
+    const { startDate, endDate, resetStartDate, resetEndDate, search, status, room, muted, organisationId, page = 1, pageSize = 10 } = req.query;
     const pool = await getPool();
     const repeatEnabled = await hasCallRepeatTable(pool);
     let query =
@@ -1134,6 +1134,14 @@ app.get("/api/calls/history", async (req: Request, res: Response) => {
     if (endDate) {
       where.push('cs.[dateTime] <= @endDate');
       params.push({ name: 'endDate', type: sql.DateTime, value: new Date(endDate as string) });
+    }
+    if (resetStartDate) {
+      where.push('cs.[dateTimeReset] >= @resetStartDate');
+      params.push({ name: 'resetStartDate', type: sql.DateTime, value: new Date(resetStartDate as string) });
+    }
+    if (resetEndDate) {
+      where.push('cs.[dateTimeReset] <= @resetEndDate');
+      params.push({ name: 'resetEndDate', type: sql.DateTime, value: new Date(resetEndDate as string) });
     }
     if (search) {
       where.push('(r.[roomName] LIKE @search OR cs.[id] LIKE @search)');

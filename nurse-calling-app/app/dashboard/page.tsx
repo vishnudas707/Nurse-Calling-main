@@ -160,12 +160,12 @@ function saveClearedCallIds(orgId: string | null, ids: Set<string>) {
     const todayStr = toDayKey(now);
     const totalCalls = visibleActiveCalls.length;
     const pendingCalls = visibleActiveCalls.filter(c => !c.muted).length;
-    const resolvedToday = todayHistory.filter(c => {
-      if (isCallActive(c) || !c.dateTimeReset) return false;
+    const resolvedToday = todayHistory.filter((c) => {
+      if (!c.dateTimeReset) return false;
       return toDayKey(c.dateTimeReset) === todayStr;
     }).length;
     const responseTimes = todayHistory
-      .filter(c => !isCallActive(c) && c.timestamp && c.dateTimeReset)
+      .filter((c) => c.timestamp && c.dateTimeReset && toDayKey(c.dateTimeReset) === todayStr)
       .map(c => (new Date(c.dateTimeReset).getTime() - new Date(c.timestamp).getTime()) / 60000)
       .filter(mins => mins >= 0);
     const avgResponseTime = responseTimes.length ? (responseTimes.reduce((a, b) => a + b, 0) / responseTimes.length).toFixed(1) + ' min' : '-';
@@ -255,11 +255,11 @@ function saveClearedCallIds(orgId: string | null, ids: Set<string>) {
   
       const fetchTodayHistory = async () => {
         const day = toDayKey(new Date());
-        const todayStart = `${day}T00:00:00`;
-        const todayEnd = `${day}T23:59:59`;
+        const todayStart = `${day}T00:00:00.000`;
+        const todayEnd = `${day}T23:59:59.999`;
         try {
           const resp = await fetch(
-            `${API_BASE}/api/calls/history${orgQuery ? orgQuery + "&" : "?"}startDate=${encodeURIComponent(todayStart)}&endDate=${encodeURIComponent(todayEnd)}&page=1&pageSize=10000`
+            `${API_BASE}/api/calls/history${orgQuery ? orgQuery + "&" : "?"}resetStartDate=${encodeURIComponent(todayStart)}&resetEndDate=${encodeURIComponent(todayEnd)}&status=resolved&page=1&pageSize=10000`
           );
           const data = await resp.json();
           if (resp.ok && data.success) {
@@ -343,6 +343,7 @@ function saveClearedCallIds(orgId: string | null, ids: Set<string>) {
               return next;
             });
             setActiveCalls((prev) => prev.filter((c) => c.id !== id));
+            fetchTodayHistory();
           } else {
             setActiveCalls((prev) => prev.map((c) => c.id === id ? { ...c, status, callType: c.callType ?? status } : c));
           }
