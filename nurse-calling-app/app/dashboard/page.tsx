@@ -6,35 +6,16 @@ import TopNavBar from "../components/navbar";
 import { Card } from "flowbite-react";
 import { getOrganisationId } from "../lib/auth";
 import { getCallTypeName, MISCELLANEOUS_CALL_TYPE } from "../lib/constants";
-import { getCallStateLabel, isCallActive, toDayKey } from "../reports/lib/report-utils";
+import { getCallStateLabel, toDayKey, getResolvedStatusClassName } from "../reports/lib/report-utils";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { io, Socket } from "socket.io-client";
 
-function clearedCallsStorageKey(orgId: string | null) {
-  return orgId ? `dashboard_cleared_calls_${orgId}` : "dashboard_cleared_calls";
-}
-
-function loadClearedCallIds(orgId: string | null): Set<string> {
-  if (typeof window === "undefined") return new Set();
-  try {
-    const raw = localStorage.getItem(clearedCallsStorageKey(orgId));
-    return new Set(raw ? (JSON.parse(raw) as string[]) : []);
-  } catch {
-    return new Set();
-  }
-}
-
-function saveClearedCallIds(orgId: string | null, ids: Set<string>) {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(clearedCallsStorageKey(orgId), JSON.stringify([...ids]));
-}
-
   function DashboardPage() {
+    const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5001";
     const [recentHistory, setRecentHistory] = useState<any[]>([]);
     const [todayHistory, setTodayHistory] = useState<any[]>([]);
     const [activeCalls, setActiveCalls] = useState<any[]>([]);
-    const [clearedCallIds, setClearedCallIds] = useState<Set<string>>(() => new Set());
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState("");
     const [socket, setSocket] = useState<Socket | null>(null);
@@ -42,30 +23,34 @@ function saveClearedCallIds(orgId: string | null, ids: Set<string>) {
     const [organisationName, setOrganisationName] = useState<string | null>(null);
     const [, forceTimeTick] = useState(0);
 
+    const resolveCallFromDashboard = useCallback(async (callId: string) => {
+      const orgId = getOrganisationId();
+      if (!orgId || !callId) return;
+      try {
+        const resp = await fetch(`${API_BASE}/api/calls/${callId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: 0, organisationId: orgId, manualResolve: true }),
+        });
+        if (!resp.ok) {
+          console.error("Failed to resolve call", await resp.text());
+          return;
+        }
+        setActiveCalls((prev) => prev.filter((c) => c.id !== callId));
+      } catch (err) {
+        console.error("Failed to resolve call", err);
+      }
+    }, [API_BASE]);
+
     const clearCallFromDashboard = useCallback((callId: string) => {
-      setClearedCallIds((prev) => {
-        const next = new Set(prev);
-        next.add(callId);
-        saveClearedCallIds(organisationId, next);
-        return next;
-      });
-    }, [organisationId]);
+      void resolveCallFromDashboard(callId);
+    }, [resolveCallFromDashboard]);
 
     const clearAllVisibleCalls = useCallback(() => {
-      setClearedCallIds((prev) => {
-        const next = new Set(prev);
-        for (const call of activeCalls) {
-          if (call.id && !prev.has(call.id)) next.add(call.id);
-        }
-        saveClearedCallIds(organisationId, next);
-        return next;
-      });
-    }, [activeCalls, organisationId]);
-
-    const visibleActiveCalls = useMemo(
-      () => activeCalls.filter((call) => call.id && !clearedCallIds.has(call.id)),
-      [activeCalls, clearedCallIds]
-    );
+      for (const call of activeCalls) {
+        if (call.id) void resolveCallFromDashboard(call.id);
+      }
+    }, [activeCalls, resolveCallFromDashboard]);
 
     function getCallTypeNum(call: { callType?: number | null; status?: number }) {
       if (call.callType != null) return call.callType;
@@ -158,8 +143,8 @@ function saveClearedCallIds(orgId: string | null, ids: Set<string>) {
     // Dynamic stats
     const now = new Date();
     const todayStr = toDayKey(now);
-    const totalCalls = visibleActiveCalls.length;
-    const pendingCalls = visibleActiveCalls.filter(c => !c.muted).length;
+    const totalCalls = activeCalls.length;
+    const pendingCalls = activeCalls.filter(c => !c.muted).length;
     const resolvedToday = todayHistory.filter((c) => {
       if (!c.dateTimeReset) return false;
       return toDayKey(c.dateTimeReset) === todayStr;
@@ -208,8 +193,6 @@ function saveClearedCallIds(orgId: string | null, ids: Set<string>) {
       },
     ];
   
-    const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5001";
-  
     useEffect(() => {
       const tickId = window.setInterval(() => {
         forceTimeTick((x) => x + 1);
@@ -217,7 +200,6 @@ function saveClearedCallIds(orgId: string | null, ids: Set<string>) {
 
       const orgId = getOrganisationId();
       setOrganisationId(orgId);
-      setClearedCallIds(loadClearedCallIds(orgId));
       const orgQuery = orgId ? `?organisationId=${encodeURIComponent(orgId)}` : "";
 
       const fetchOrganisationName = async () => {
@@ -334,16 +316,9 @@ function saveClearedCallIds(orgId: string | null, ids: Set<string>) {
         try {
           console.log('[SocketIO] Received call:status', { id, status });
           if (status === 0) {
-            // Remove card when status is reset; also drop from cleared list
-            setClearedCallIds((prev) => {
-              if (!prev.has(id)) return prev;
-              const next = new Set(prev);
-              next.delete(id);
-              saveClearedCallIds(orgId, next);
-              return next;
-            });
             setActiveCalls((prev) => prev.filter((c) => c.id !== id));
             fetchTodayHistory();
+            fetchRecentHistory();
           } else {
             setActiveCalls((prev) => prev.map((c) => c.id === id ? { ...c, status, callType: c.callType ?? status } : c));
           }
@@ -395,7 +370,7 @@ function saveClearedCallIds(orgId: string | null, ids: Set<string>) {
                   </p>
                 )}
               </div>
-              {!isLoading && !error && visibleActiveCalls.length > 0 && (
+              {!isLoading && !error && activeCalls.length > 0 && (
                 <button
                   type="button"
                   onClick={clearAllVisibleCalls}
@@ -412,10 +387,10 @@ function saveClearedCallIds(orgId: string | null, ids: Set<string>) {
                 <div className="col-span-6 text-center text-gray-600 dark:text-gray-300 py-8">Loading active calls...</div>
               ) : error ? (
                 <div className="col-span-6 text-center text-red-600 dark:text-red-300 py-8">{error}</div>
-              ) : visibleActiveCalls.length === 0 ? (
+              ) : activeCalls.length === 0 ? (
                 <div className="col-span-6 text-center text-gray-600 dark:text-gray-300 py-8">No active calls</div>
               ) : (
-                visibleActiveCalls.map((call) => (
+                activeCalls.map((call) => (
                   (() => {
                     const theme = getCallTheme(getCallTypeNum(call), call.muted);
                     return (
@@ -473,9 +448,9 @@ function saveClearedCallIds(orgId: string | null, ids: Set<string>) {
                     )}
                     <button
                       type="button"
-                      className="mt-2 rounded px-2 py-1 text-xs font-medium border border-gray-400 bg-white text-gray-700 hover:bg-gray-100 dark:border-gray-500 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                      className="mt-2 rounded px-2 py-1 text-xs font-medium border border-amber-500 bg-amber-50 text-amber-900 hover:bg-amber-100 dark:border-amber-600 dark:bg-amber-950 dark:text-amber-200 dark:hover:bg-amber-900"
                       onClick={() => clearCallFromDashboard(call.id)}
-                      title="Hide from dashboard only (does not reset the call)"
+                      title="Resolve call and record reset time in reports"
                     >
                       Clear
                     </button>
@@ -557,15 +532,14 @@ function saveClearedCallIds(orgId: string | null, ids: Set<string>) {
                               </span>
                             );
                           })()}
-                          <span
-                            className={`inline-block rounded-full px-3 py-1 text-xs font-semibold ${
-                              isCallActive(item)
-                                ? "bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-300"
-                                : "bg-gray-100 text-gray-700 dark:bg-gray-900 dark:text-gray-300"
-                            }`}
-                          >
+                          <span className={getResolvedStatusClassName(item)}>
                             {getCallStateLabel(item)}
                           </span>
+                          {item.dateTimeReset ? (
+                            <p className="text-xs text-amber-800 dark:text-amber-300">
+                              Reset: {new Date(item.dateTimeReset).toLocaleString()}
+                            </p>
+                          ) : null}
                           <p className="text-xs text-gray-600 dark:text-gray-400">
                             {item.timestamp ? new Date(item.timestamp).toLocaleString() : ''}
                           </p>

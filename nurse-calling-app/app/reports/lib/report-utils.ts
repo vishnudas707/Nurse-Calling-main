@@ -92,6 +92,20 @@ export function getCallStateLabel(call: CallRecord): "Active" | "Resolved" {
   return isCallActive(call) ? "Active" : "Resolved";
 }
 
+export function isDashboardResolved(call: CallRecord): boolean {
+  return call?.resolvedManually === true || call?.resolvedManually === 1;
+}
+
+export function getResolvedStatusClassName(call: CallRecord): string {
+  if (isCallActive(call)) {
+    return "inline-block rounded-full px-3 py-1 text-xs font-semibold bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200";
+  }
+  if (isDashboardResolved(call)) {
+    return "inline-block rounded-full px-3 py-1 text-xs font-semibold bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200";
+  }
+  return "inline-block rounded-full px-3 py-1 text-xs font-semibold bg-gray-100 text-gray-700 dark:bg-gray-900 dark:text-gray-300";
+}
+
 export function getLagMinutes(call: CallRecord) {
   if (!call?.timestamp || !call?.dateTimeReset) return null;
   const start = new Date(call.timestamp).getTime();

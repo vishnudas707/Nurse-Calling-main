@@ -13,6 +13,7 @@ import {
   buildCallsHistoryParams,
   getCallStateLabel,
   isCallActive,
+  getResolvedStatusClassName,
   sortCallsForReportTable,
 } from "./lib/report-utils";
 
@@ -324,9 +325,9 @@ export default function ReportsPage() {
                           })()}
                         </td>
                         <td className="px-4 py-2 whitespace-nowrap">
-                          {isCallActive(call)
-                            ? <span className="text-green-700 font-bold">Active</span>
-                            : <span className="text-gray-700 font-bold">Resolved</span>}
+                          <span className={getResolvedStatusClassName(call)}>
+                            {getCallStateLabel(call)}
+                          </span>
                         </td>
                         <td className="px-4 py-2 whitespace-nowrap">{call.muted ? 'Muted' : 'Unmuted'}</td>
                         <td className="px-4 py-2 whitespace-nowrap">{call.timestamp ? new Date(call.timestamp).toLocaleString() : ''}</td>

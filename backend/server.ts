@@ -64,6 +64,7 @@ const PORT = process.env.PORT || 5001;
 // So we only *use* CallRepeat table if it already exists.
 let callRepeatTableCache: boolean | null = null;
 let activityLogTableCache: boolean | null = null;
+let resolvedManuallyColumnCache: boolean | null = null;
 const ACTIVITY_LOG_TABLE = "ActivityLog";
 
 type ActivityLogInput = {
@@ -77,6 +78,36 @@ type ActivityLogInput = {
   actorName?: string | null;
   details?: Record<string, unknown>;
 };
+
+async function hasResolvedManuallyColumn(pool: Awaited<ReturnType<typeof getPool>>): Promise<boolean> {
+  if (resolvedManuallyColumnCache !== null) return resolvedManuallyColumnCache;
+  try {
+    const r = await pool.request().query(`SELECT COL_LENGTH(OBJECT_ID(N'[dbo].[CallStatus]'), 'resolvedManually') AS colLen`);
+    resolvedManuallyColumnCache = (r?.recordset?.[0]?.colLen ?? null) != null;
+    return resolvedManuallyColumnCache;
+  } catch {
+    resolvedManuallyColumnCache = false;
+    return false;
+  }
+}
+
+function isResolvedManuallyValue(value: unknown): boolean | null {
+  if (value === true || value === 1) return true;
+  if (value === false || value === 0) return false;
+  return null;
+}
+
+function mapResolvedManually(row: {
+  resolvedManually?: boolean | number | null;
+  resolveAction?: string | null;
+  dateTimeReset?: Date | string | null;
+}): boolean | null {
+  const fromColumn = isResolvedManuallyValue(row.resolvedManually);
+  if (fromColumn !== null) return fromColumn;
+  if (row.resolveAction === "call.resolved.dashboard") return true;
+  if (row.resolveAction === "call.resolved" || row.dateTimeReset) return false;
+  return null;
+}
 
 async function hasActivityLogTable(pool: Awaited<ReturnType<typeof getPool>>): Promise<boolean> {
   if (activityLogTableCache !== null) return activityLogTableCache;
@@ -1041,7 +1072,7 @@ app.post("/api/calls", async (req: Request, res: Response) => {
 // Update call status or mute in DB
 app.put("/api/calls/:id", async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { status, muted, organisationId } = req.body;
+  const { status, muted, organisationId, manualResolve } = req.body;
   try {
     const pool = await getPool();
     // Update mute status and/or status in CallStatus table
@@ -1057,6 +1088,14 @@ app.put("/api/calls/:id", async (req: Request, res: Response) => {
     if (status !== undefined) {
       updateFields.push('[currentStatus] = @currentStatus');
       params.push({ name: 'currentStatus', type: sql.Int, value: status });
+      if (Number(status) === 0) {
+        updateFields.push('[dateTimeReset] = @dateTimeReset');
+        params.push({ name: 'dateTimeReset', type: sql.DateTime, value: new Date() });
+        if (manualResolve && await hasResolvedManuallyColumn(pool)) {
+          updateFields.push('[resolvedManually] = @resolvedManually');
+          params.push({ name: 'resolvedManually', type: sql.Bit, value: 1 });
+        }
+      }
     }
     if (updateFields.length === 0) {
       return res.status(400).json({ success: false, error: 'No fields to update' });
@@ -1068,13 +1107,26 @@ app.put("/api/calls/:id", async (req: Request, res: Response) => {
     await updateReq.query(updateQuery);
 
     // Fetch updated call
+    const resolvedManuallyEnabled = await hasResolvedManuallyColumn(pool);
     const result = await pool.request().input('id', sql.NVarChar(50), id).query(
-      `SELECT cs.[id], cs.[roomId], cs.[currentStatus], cs.[callType], cs.[dateTime], cs.[isMuted], cs.[mutedDateTime], cs.[dateTimeReset], r.[roomName]
+      `SELECT cs.[id], cs.[roomId], cs.[currentStatus], cs.[callType], cs.[dateTime], cs.[isMuted], cs.[mutedDateTime], cs.[dateTimeReset]${
+        resolvedManuallyEnabled ? `, cs.[resolvedManually]` : ``
+      }, r.[roomName]
        FROM [CallStatus] cs
        LEFT JOIN [Room] r ON cs.[roomId] = r.[id]
        WHERE cs.[id] = @id`
     );
     const row = result.recordset[0];
+    if (Number(status) === 0 && manualResolve) {
+      await writeActivityLog(pool, {
+        organisationId: String(organisationId || ""),
+        action: "call.resolved.dashboard",
+        entityType: "call",
+        entityId: id,
+        message: `Call resolved from dashboard: ${row?.roomName || id}`,
+        details: { source: "dashboard" },
+      });
+    }
     const call = row
       ? withCallTypeFields(withCallStatusFields({
           id: row.id,
@@ -1087,6 +1139,10 @@ app.put("/api/calls/:id", async (req: Request, res: Response) => {
           muted: row.isMuted === 1 || row.isMuted === true,
           mutedDateTime: row.mutedDateTime,
           dateTimeReset: row.dateTimeReset,
+          resolvedManually:
+            manualResolve && Number(status) === 0
+              ? true
+              : mapResolvedManually(row),
           organisationId
         }))
       : null;
@@ -1108,11 +1164,19 @@ app.get("/api/calls/history", async (req: Request, res: Response) => {
     const { startDate, endDate, resetStartDate, resetEndDate, search, status, room, muted, organisationId, page = 1, pageSize = 10 } = req.query;
     const pool = await getPool();
     const repeatEnabled = await hasCallRepeatTable(pool);
+    const activityLogEnabled = await hasActivityLogTable(pool);
+    const resolvedManuallyEnabled = await hasResolvedManuallyColumn(pool);
     let query =
       `SELECT cs.[id], cs.[roomId], cs.[currentStatus], cs.[callType], cs.[dateTime], cs.[isMuted], cs.[mutedDateTime], cs.[dateTimeReset], r.[roomName], r.[departmentType], r.[roomType], r.[floor]${
+        resolvedManuallyEnabled ? `, cs.[resolvedManually] AS [resolvedManually]` : `, NULL AS [resolvedManually]`
+      }${
         repeatEnabled
           ? `, ISNULL(cr.[repeatCount], 0) AS [repeatCount], cr.[lastRepeatAt] AS [lastRepeatAt]`
           : `, 0 AS [repeatCount], NULL AS [lastRepeatAt]`
+      }${
+        activityLogEnabled
+          ? `, resolveLog.[action] AS resolveAction`
+          : `, NULL AS resolveAction`
       }
        FROM [CallStatus] cs
        LEFT JOIN [Room] r ON cs.[roomId] = r.[id]
@@ -1123,6 +1187,20 @@ app.get("/api/calls/history", async (req: Request, res: Response) => {
                 FROM [CallRepeat]
                 GROUP BY callId
               ) cr ON cr.callId = cs.[id]`
+           : ``
+       }${
+         activityLogEnabled
+           ? ` LEFT JOIN (
+                SELECT al.entityId, al.action
+                FROM [ActivityLog] al
+                INNER JOIN (
+                  SELECT entityId, MAX(createdAt) AS maxCreatedAt
+                  FROM [ActivityLog]
+                  WHERE entityType = N'call' AND action IN (N'call.resolved', N'call.resolved.dashboard')
+                  GROUP BY entityId
+                ) latest ON al.entityId = latest.entityId AND al.createdAt = latest.maxCreatedAt
+                WHERE al.entityType = N'call' AND al.action IN (N'call.resolved', N'call.resolved.dashboard')
+              ) resolveLog ON resolveLog.entityId = cs.[id]`
            : ``
        }`;
     const where: string[] = [];
@@ -1206,6 +1284,7 @@ app.get("/api/calls/history", async (req: Request, res: Response) => {
         muted: row.isMuted === 1 || row.isMuted === true,
         mutedDateTime: row.mutedDateTime,
         dateTimeReset: row.dateTimeReset,
+        resolvedManually: mapResolvedManually(row),
         departmentType: row.departmentType,
         roomType: row.roomType,
         floor: row.floor,
@@ -1356,11 +1435,17 @@ async function processCallStatusForRoom(
   }
   if (activeCallResult.recordset.length > 0 && isReset) {
     const callId = activeCallResult.recordset[0].id;
-    await pool.request()
+    const resolvedManuallyEnabled = await hasResolvedManuallyColumn(pool);
+    const resetReq = pool.request()
       .input('id', sql.NVarChar(50), callId)
       .input('currentStatus', sql.Int, 0)
-      .input('dateTimeReset', sql.DateTime, new Date())
-      .query(`UPDATE [CallStatus] SET currentStatus = @currentStatus, dateTimeReset = @dateTimeReset WHERE id = @id`);
+      .input('dateTimeReset', sql.DateTime, new Date());
+    if (resolvedManuallyEnabled) resetReq.input('resolvedManually', sql.Bit, 0);
+    await resetReq.query(
+      resolvedManuallyEnabled
+        ? `UPDATE [CallStatus] SET currentStatus = @currentStatus, dateTimeReset = @dateTimeReset, resolvedManually = @resolvedManually WHERE id = @id`
+        : `UPDATE [CallStatus] SET currentStatus = @currentStatus, dateTimeReset = @dateTimeReset WHERE id = @id`
+    );
     io.to(`org_${orgId}`).emit("call:status", { id: callId, status: 0 });
     await writeActivityLog(pool, {
       organisationId: orgId,
