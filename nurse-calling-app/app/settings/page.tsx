@@ -5,7 +5,7 @@
 import TopNavBar from "../components/navbar";
 import { Card } from "flowbite-react";
 import { useState, useEffect } from "react";
-import { ROOM_TYPE_MAP, DEPARTMENT_TYPE_MAP, getRoomTypeOptions, getDepartmentTypeOptions } from "../lib/constants";
+import { getRoomTypeOptions, getDepartmentTypeOptions, getRoomTypeName, getDepartmentTypeName } from "../lib/constants";
 import { getOrganisationId } from "../lib/auth";
 
 interface User {
@@ -440,10 +440,10 @@ export default function SettingsPage() {
                                 {room.roomNo_deviceNo || "—"}
                               </td>
                               <td className="px-6 py-4 text-gray-600 dark:text-gray-400">
-                                {room.roomTypeName}
+                                {getRoomTypeName(Number(room.roomType))}
                               </td>
                               <td className="px-6 py-4 text-gray-600 dark:text-gray-400">
-                                {room.departmentTypeName || room.departmentType}
+                                {getDepartmentTypeName(Number(room.departmentType))}
                               </td>
                               <td className="px-6 py-4 text-gray-600 dark:text-gray-400">
                                 {room.floor || "—"}

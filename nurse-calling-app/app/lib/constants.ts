@@ -5,6 +5,7 @@ export const ROOM_TYPE_MAP: { [key: number]: string } = {
   3: "ICU",
   4: "Private",
   5: "Isolation",
+  6: "Room",
 };
 
 // Department Type Mapping
@@ -16,6 +17,7 @@ export const DEPARTMENT_TYPE_MAP: { [key: number]: string } = {
   5: "Surgery",
   6: "Cardiology",
   7: "Neurology",
+  8: "Rooms",
 };
 
 // Helper function to get room type name
