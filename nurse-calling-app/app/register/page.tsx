@@ -58,7 +58,7 @@ export default function RegisterPage() {
 
     try {
       const apiBase =
-        (process.env.NEXT_PUBLIC_API_URL as string) || "http://localhost:5001";
+        (process.env.NEXT_PUBLIC_API_URL as string) || "http://20.163.9.187:5001";
       const name = `${formData.firstName.trim()} ${formData.lastName.trim()}`.trim();
       const id = `USER_${Date.now()}`;
 
@@ -116,29 +116,35 @@ export default function RegisterPage() {
   };
 
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center bg-white px-4 py-12 dark:bg-gray-900">
-      <div className="absolute top-4 right-4">
+    <main className="auth-shell">
+      <div className="absolute top-4 right-4 z-10">
         <DarkThemeToggle />
       </div>
 
-      <div className="w-full max-w-md">
-        <div className="rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800">
-          <div className="px-6 py-8">
-            <h1 className="mb-2 text-center text-3xl font-bold text-gray-900 dark:text-white">
-              Create Account
-            </h1>
-            <p className="mb-6 text-center text-gray-600 dark:text-gray-400">
-              Sign up for your organisation&apos;s nurse dashboard
-            </p>
+      <div className="auth-card">
+            <div className="mb-6 flex flex-col items-center text-center">
+              <span className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-teal-700 text-base font-bold text-white shadow-md">
+                CC
+              </span>
+              <p className="text-sm font-semibold tracking-wide text-teal-700 dark:text-teal-400">
+                Care Call
+              </p>
+              <h1 className="mt-2 text-2xl font-bold text-gray-900 dark:text-white sm:text-3xl">
+                Create account
+              </h1>
+              <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+                Sign up for your organisation&apos;s nurse dashboard
+              </p>
+            </div>
 
             {error && (
-              <div className="mb-4 rounded-lg bg-red-50 p-4 text-sm text-red-800 dark:bg-red-900 dark:text-red-200">
+              <div className="mb-4 rounded-xl bg-red-50 p-3.5 text-sm text-red-800 dark:bg-red-900/60 dark:text-red-200">
                 {error}
               </div>
             )}
 
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
                   <label
                     htmlFor="firstName"
@@ -152,7 +158,7 @@ export default function RegisterPage() {
                     name="firstName"
                     value={formData.firstName}
                     onChange={handleChange}
-                    className="block w-full rounded-lg border border-gray-300 bg-gray-50 p-2.5 text-gray-900 focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:placeholder-gray-400 dark:focus:border-blue-500 dark:focus:ring-blue-500"
+                    className="auth-input"
                     placeholder="John"
                     required
                   />
@@ -171,7 +177,7 @@ export default function RegisterPage() {
                     name="lastName"
                     value={formData.lastName}
                     onChange={handleChange}
-                    className="block w-full rounded-lg border border-gray-300 bg-gray-50 p-2.5 text-gray-900 focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:placeholder-gray-400 dark:focus:border-blue-500 dark:focus:ring-blue-500"
+                    className="auth-input"
                     placeholder="Doe"
                     required
                   />
@@ -191,7 +197,7 @@ export default function RegisterPage() {
                   name="organisationId"
                   value={formData.organisationId}
                   onChange={handleChange}
-                  className="block w-full rounded-lg border border-gray-300 bg-gray-50 p-2.5 text-gray-900 focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:placeholder-gray-400 dark:focus:border-blue-500 dark:focus:ring-blue-500"
+                  className="auth-input"
                   placeholder="e.g. ORG001"
                   required
                 />
@@ -214,7 +220,7 @@ export default function RegisterPage() {
                   name="email"
                   value={formData.email}
                   onChange={handleChange}
-                  className="block w-full rounded-lg border border-gray-300 bg-gray-50 p-2.5 text-gray-900 focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:placeholder-gray-400 dark:focus:border-blue-500 dark:focus:ring-blue-500"
+                  className="auth-input"
                   placeholder="name@example.com"
                   required
                 />
@@ -233,7 +239,7 @@ export default function RegisterPage() {
                   name="password"
                   value={formData.password}
                   onChange={handleChange}
-                  className="block w-full rounded-lg border border-gray-300 bg-gray-50 p-2.5 text-gray-900 focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:placeholder-gray-400 dark:focus:border-blue-500 dark:focus:ring-blue-500"
+                  className="auth-input"
                   placeholder="••••••••"
                   required
                 />
@@ -255,24 +261,24 @@ export default function RegisterPage() {
                   name="confirmPassword"
                   value={formData.confirmPassword}
                   onChange={handleChange}
-                  className="block w-full rounded-lg border border-gray-300 bg-gray-50 p-2.5 text-gray-900 focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:placeholder-gray-400 dark:focus:border-blue-500 dark:focus:ring-blue-500"
+                  className="auth-input"
                   placeholder="••••••••"
                   required
                 />
               </div>
 
               <div className="flex items-start">
-                <label className="flex items-center">
+                <label className="flex min-h-11 items-center">
                   <input
                     type="checkbox"
-                    className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:ring-offset-gray-800"
+                    className="h-4 w-4 rounded border-gray-300 text-teal-700 focus:ring-2 focus:ring-teal-500 dark:border-gray-600 dark:bg-gray-700"
                     required
                   />
                   <span className="ml-2 text-sm text-gray-600 dark:text-gray-300">
                     I agree to the{" "}
                     <a
                       href="#"
-                      className="text-blue-600 hover:underline dark:text-blue-400"
+                      className="font-medium text-teal-700 hover:underline dark:text-teal-400"
                     >
                       terms and conditions
                     </a>
@@ -280,28 +286,22 @@ export default function RegisterPage() {
                 </label>
               </div>
 
-              <button
-                type="submit"
-                disabled={isLoading}
-                className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-center text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-300 disabled:bg-gray-400 dark:bg-blue-600 dark:hover:bg-blue-700 dark:focus:ring-blue-800"
-              >
+              <button type="submit" disabled={isLoading} className="auth-primary-btn">
                 {isLoading ? "Creating account..." : "Create Account"}
               </button>
             </form>
 
-            <div className="mt-4 text-center">
+            <div className="mt-5 text-center">
               <p className="text-sm text-gray-600 dark:text-gray-400">
                 Already have an account?{" "}
                 <Link
                   href="/login"
-                  className="font-medium text-blue-600 hover:underline dark:text-blue-400"
+                  className="font-semibold text-teal-700 hover:underline dark:text-teal-400"
                 >
                   Sign in here
                 </Link>
               </p>
             </div>
-          </div>
-        </div>
       </div>
     </main>
   );

@@ -43,33 +43,33 @@ export default function ReportFilters({
   setLagThresholdMinutes,
 }: ReportFiltersProps) {
   return (
-    <Card className="mb-8 dark:bg-gray-800">
-      <div className="flex flex-wrap gap-4 items-center mb-4">
+    <Card className="mb-6 rounded-2xl dark:bg-gray-800 sm:mb-8">
+      <div className="mb-4 flex flex-wrap gap-3 items-center">
         <Link
           href="/reports"
-          className="px-3 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+          className="touch-btn border border-gray-300 text-gray-700 hover:bg-gray-100 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
         >
           Back to Reports
         </Link>
       </div>
-      <div className="flex flex-wrap gap-4 items-center">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <TextInput
           placeholder="Search by Room or Call ID"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="min-w-[180px] flex-1"
+          className="w-full"
         />
-        <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="min-w-[140px] flex-1">
+        <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-full">
           <option value="">All Statuses</option>
           <option value="active">Active</option>
           <option value="resolved">Resolved</option>
         </Select>
-        <Select value={mutedFilter} onChange={(e) => setMutedFilter(e.target.value)} className="min-w-[120px] flex-1">
+        <Select value={mutedFilter} onChange={(e) => setMutedFilter(e.target.value)} className="w-full">
           <option value="">All</option>
           <option value="true">Muted</option>
           <option value="false">Unmuted</option>
         </Select>
-        <Select value={roomFilter} onChange={(e) => setRoomFilter(e.target.value)} className="min-w-[160px] flex-1">
+        <Select value={roomFilter} onChange={(e) => setRoomFilter(e.target.value)} className="w-full">
           <option value="">All Rooms</option>
           {rooms.map((room) => (
             <option key={room.id} value={room.id}>
@@ -78,32 +78,31 @@ export default function ReportFilters({
           ))}
         </Select>
       </div>
-      <div className="flex flex-wrap gap-4 items-center mt-4">
-        <label className="text-gray-700 dark:text-gray-300">Start Date:</label>
+      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 lg:items-center">
+        <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Start Date</label>
         <input
           type="date"
           value={startDate}
           onChange={(e) => setStartDate(e.target.value)}
-          className="border rounded px-2 py-1 min-w-[140px] flex-1 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+          className="w-full rounded-xl border border-gray-300 px-3 py-2.5 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
         />
-        <span className="text-gray-500 dark:text-gray-300">to</span>
-        <label className="text-gray-700 dark:text-gray-300">End Date:</label>
+        <label className="text-sm font-medium text-gray-700 dark:text-gray-300">End Date</label>
         <input
           type="date"
           value={endDate}
           onChange={(e) => setEndDate(e.target.value)}
-          className="border rounded px-2 py-1 min-w-[140px] flex-1 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+          className="w-full rounded-xl border border-gray-300 px-3 py-2.5 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
         />
         {showLagThreshold && setLagThresholdMinutes !== undefined && lagThresholdMinutes !== undefined && (
           <>
-            <label className="text-gray-700 dark:text-gray-300">Attending Lag (min):</label>
+            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Attending Lag (min)</label>
             <input
               type="number"
               min={0}
               step={1}
               value={lagThresholdMinutes}
               onChange={(e) => setLagThresholdMinutes(Number(e.target.value))}
-              className="border rounded px-2 py-1 w-[140px] dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+              className="w-full rounded-xl border border-gray-300 px-3 py-2.5 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
             />
           </>
         )}

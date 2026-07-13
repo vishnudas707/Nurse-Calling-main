@@ -36,7 +36,7 @@ export default function SettingsPage() {
   const [editRoomId, setEditRoomId] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState("");
 
-  const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5001";
+  const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://20.163.9.187:5001";
 
   // Fetch user data and rooms on component mount
   useEffect(() => {
@@ -206,32 +206,21 @@ export default function SettingsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-white dark:bg-gray-900">
+    <div className="page-shell">
       <TopNavBar />
 
-      <div className="px-4 py-12 sm:px-6 lg:px-8">
-        <div className="mx-auto max-w-4xl">
-          {/* Header 
-          <div className="mb-8">
-            <h1 className="text-4xl font-bold text-gray-900 dark:text-white">
-              Settings
-            </h1>
-            <p className="mt-2 text-gray-600 dark:text-gray-400">
-              Manage your account and system preferences
-            </p>
-          </div>*/}
-
+      <div className="page-container-narrow">
           {/* Tab Navigation */}
-          <div className="mb-8 flex gap-4 border-b border-gray-200 dark:border-gray-700">
+          <div className="mb-6 flex gap-2 overflow-x-auto border-b border-gray-200 dark:border-gray-700">
             {[
               { id: "rooms", label: "Manage Rooms" },
             ].map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`px-4 py-2 font-medium transition-colors ${
+                className={`min-h-11 shrink-0 px-4 py-2.5 font-medium transition-colors ${
                   activeTab === tab.id
-                    ? "border-b-2 border-blue-600 text-blue-600 dark:text-blue-400"
+                    ? "border-b-2 border-teal-700 text-teal-700 dark:text-teal-400"
                     : "text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white"
                 }`}
               >
@@ -251,8 +240,8 @@ export default function SettingsPage() {
           {activeTab === "rooms" && (
             <div className="space-y-6">
               {/* Add Room Button */}
-              <div className="flex justify-between items-center">
-                <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <h2 className="text-xl font-bold text-gray-900 dark:text-white sm:text-2xl">
                   Rooms
                 </h2>
                 <button
@@ -263,7 +252,7 @@ export default function SettingsPage() {
                     }
                     setShowForm(!showForm);
                   }}
-                  className="rounded-lg bg-blue-600 px-6 py-2.5 text-white hover:bg-blue-700 disabled:bg-gray-400"
+                  className="touch-btn w-full bg-teal-700 text-white hover:bg-teal-800 disabled:bg-gray-400 sm:w-auto"
                   disabled={!user}
                 >
                   {showForm ? "Cancel" : "+ Add New Room"}
@@ -272,14 +261,14 @@ export default function SettingsPage() {
 
               {/* Add Room Form */}
               {showForm && (
-                <Card className="dark:bg-gray-800">
+                <Card className="rounded-2xl dark:bg-gray-800">
                   <form onSubmit={handleAddRoom} className="space-y-6">
                     {error && (
-                      <div className="rounded-lg bg-red-50 p-4 text-red-800 dark:bg-red-900 dark:text-red-200">
+                      <div className="rounded-xl bg-red-50 p-4 text-red-800 dark:bg-red-900 dark:text-red-200">
                         {error}
                       </div>
                     )}
-                    <div className="grid grid-cols-1 gap-6 sm:grid-cols-4">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
                       <div>
                         <label className="mb-2 block text-sm font-medium text-gray-900 dark:text-white">
                           Room Name *
@@ -388,7 +377,7 @@ export default function SettingsPage() {
                     Loading rooms...
                   </div>
                 ) : (
-                  <div className="overflow-x-auto">
+                  <div className="table-scroll">
                     <table className="w-full text-left text-sm">
                       <thead className="border-b border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-900">
                         <tr>
@@ -472,7 +461,6 @@ export default function SettingsPage() {
               </Card>
             </div>
           )}
-        </div>
       </div>
     </div>
   );

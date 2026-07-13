@@ -2,103 +2,129 @@
 
 import { DarkThemeToggle } from "flowbite-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { clearUserSession, isSuperAdmin } from "../lib/auth";
 
 export default function TopNavBar() {
   const router = useRouter();
+  const pathname = usePathname();
   const [showSuperAdmin, setShowSuperAdmin] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
     setShowSuperAdmin(isSuperAdmin());
   }, []);
+
+  useEffect(() => {
+    setMenuOpen(false);
+  }, [pathname]);
 
   const handleLogout = () => {
     clearUserSession();
     router.push("/login");
   };
 
+  const userLinks = [
+    { href: "/dashboard", label: "Dashboard" },
+    { href: "/reports", label: "Reports" },
+    { href: "/settings", label: "Settings" },
+  ];
+
+  const adminLinks = [
+    { href: "/super-admin/organisations", label: "Organisations" },
+    { href: "/super-admin/users", label: "Users" },
+    { href: "/super-admin/logs", label: "Activity Log" },
+  ];
+
+  const links = showSuperAdmin ? adminLinks : userLinks;
+  const homeHref = showSuperAdmin ? "/super-admin/organisations" : "/dashboard";
+
+  const linkClass = (href: string) => {
+    const active = pathname === href || pathname.startsWith(`${href}/`);
+    return `rounded-xl px-3 py-2.5 text-sm font-medium transition ${
+      active
+        ? "bg-teal-700 text-white"
+        : "text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700"
+    }`;
+  };
+
   return (
-    <nav className="border-b border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
-      <div className="flex items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
-        {/* Brand */}
-        <Link href={showSuperAdmin ? "/super-admin/organisations" : "/dashboard"} className="flex items-center">
-          <span className="whitespace-nowrap text-2xl font-semibold text-gray-900 dark:text-white">
+    <nav className="sticky top-0 z-40 border-b border-gray-200/80 bg-white/95 backdrop-blur dark:border-gray-700 dark:bg-gray-900/95">
+      <div
+        className="flex items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-8"
+        style={{ paddingTop: "calc(0.75rem + env(safe-area-inset-top))" }}
+      >
+        <Link href={homeHref} className="flex min-w-0 items-center gap-2.5">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-teal-700 text-sm font-bold text-white shadow-sm">
+            CC
+          </span>
+          <span className="truncate text-lg font-semibold tracking-tight text-gray-900 dark:text-white sm:text-xl">
             Care Call
           </span>
         </Link>
 
-        {/* Center Nav Links */}
-        <ul className="flex items-center gap-8">
-          {showSuperAdmin ? (
-            <>
-              <li>
-                <Link
-                  href="/super-admin/organisations"
-                  className="text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white"
-                >
-                  Organisations
-                </Link>
-              </li>
-              <li>
-                <Link
-                  href="/super-admin/users"
-                  className="text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white"
-                >
-                  Users
-                </Link>
-              </li>
-              <li>
-                <Link
-                  href="/super-admin/logs"
-                  className="text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white"
-                >
-                  Activity Log
-                </Link>
-              </li>
-            </>
-          ) : (
-            <>
-              <li>
-                <Link
-                  href="/dashboard"
-                  className="text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white"
-                >
-                  Dashboard
-                </Link>
-              </li>
-              <li>
-                <Link
-                  href="/reports"
-                  className="text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white"
-                >
-                  Reports
-                </Link>
-              </li>
-              <li>
-                <Link
-                  href="/settings"
-                  className="text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white"
-                >
-                  Settings
-                </Link>
-              </li>
-            </>
-          )}
+        <ul className="hidden items-center gap-1 md:flex">
+          {links.map((link) => (
+            <li key={link.href}>
+              <Link href={link.href} className={linkClass(link.href)}>
+                {link.label}
+              </Link>
+            </li>
+          ))}
         </ul>
 
-        {/* Right side items */}
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-1.5 sm:gap-2">
           <button
+            type="button"
             onClick={handleLogout}
-            className="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+            className="hidden rounded-xl px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40 sm:inline-flex"
           >
             Logout
           </button>
           <DarkThemeToggle />
+          <button
+            type="button"
+            aria-label={menuOpen ? "Close menu" : "Open menu"}
+            aria-expanded={menuOpen}
+            onClick={() => setMenuOpen((open) => !open)}
+            className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-800 dark:border-gray-600 dark:bg-gray-800 dark:text-white md:hidden"
+          >
+            {menuOpen ? (
+              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" />
+              </svg>
+            ) : (
+              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" d="M4 7h16M4 12h16M4 17h16" />
+              </svg>
+            )}
+          </button>
         </div>
       </div>
+
+      {menuOpen && (
+        <div className="border-t border-gray-200 bg-white px-4 py-3 dark:border-gray-700 dark:bg-gray-900 md:hidden">
+          <ul className="flex flex-col gap-1">
+            {links.map((link) => (
+              <li key={link.href}>
+                <Link href={link.href} className={`block ${linkClass(link.href)}`}>
+                  {link.label}
+                </Link>
+              </li>
+            ))}
+            <li>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="mt-1 w-full rounded-xl px-3 py-2.5 text-left text-sm font-medium text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
+              >
+                Logout
+              </button>
+            </li>
+          </ul>
+        </div>
+      )}
     </nav>
   );
 }

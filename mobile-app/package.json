@@ -1,0 +1,18 @@
+{
+  "name": "nurse-calling-mobile",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Android wrapper for Nurse Calling UI",
+  "scripts": {
+    "sync": "npx cap sync android",
+    "open": "npx cap open android",
+    "build:apk": "cd android && .\\gradlew.bat assembleDebug"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.4.2",
+    "@capacitor/core": "^7.4.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.4.2"
+  }
+}

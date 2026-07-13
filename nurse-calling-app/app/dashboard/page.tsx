@@ -12,7 +12,7 @@ import { useEffect, useState, useCallback } from "react";
 import { io, Socket } from "socket.io-client";
 
   function DashboardPage() {
-    const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5001";
+    const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://20.163.9.187:5001";
     const [recentHistory, setRecentHistory] = useState<any[]>([]);
     const [todayHistory, setTodayHistory] = useState<any[]>([]);
     const [activeCalls, setActiveCalls] = useState<any[]>([]);
@@ -335,27 +335,15 @@ import { io, Socket } from "socket.io-client";
     }, []);
   
     return (
-      <div className="min-h-screen bg-white dark:bg-gray-900">
+      <div className="page-shell">
         <TopNavBar />
 
-      <div className="px-4 py-12 sm:px-6 lg:px-8">
-        <div className="mx-auto max-w-7xl">
-          {/* Welcome Section 
-          <div className="mb-8">
-            {/*<h1 className="text-4xl font-bold text-gray-900 dark:text-white">
-              Welcome to Dashboard
-            </h1>
-            <p className="mt-2 text-gray-600 dark:text-gray-400">
-              Here's an overview of your nurse calling system performance
-            </p>
-            
-          </div>*/}
-
+      <div className="page-container">
           {/* Active Calls Section - Moved to Top */}
-          <div className="mb-12">
-            <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+          <div className="mb-8">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
+                <h2 className="text-xl font-bold tracking-tight text-gray-900 dark:text-white sm:text-2xl">
                   Active Calls
                 </h2>
                 {organisationId && (
@@ -374,7 +362,7 @@ import { io, Socket } from "socket.io-client";
                 <button
                   type="button"
                   onClick={clearAllVisibleCalls}
-                  className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                  className="touch-btn border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
                 >
                   Clear All
                 </button>
@@ -382,13 +370,13 @@ import { io, Socket } from "socket.io-client";
             </div>
 
             {/* Active Calls Grid - 6 per row */}
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-6">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
               {isLoading ? (
-                <div className="col-span-6 text-center text-gray-600 dark:text-gray-300 py-8">Loading active calls...</div>
+                <div className="col-span-full rounded-2xl border border-dashed border-gray-300 py-10 text-center text-gray-600 dark:border-gray-600 dark:text-gray-300">Loading active calls...</div>
               ) : error ? (
-                <div className="col-span-6 text-center text-red-600 dark:text-red-300 py-8">{error}</div>
+                <div className="col-span-full rounded-2xl border border-red-200 bg-red-50 py-10 text-center text-red-600 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">{error}</div>
               ) : activeCalls.length === 0 ? (
-                <div className="col-span-6 text-center text-gray-600 dark:text-gray-300 py-8">No active calls</div>
+                <div className="col-span-full rounded-2xl border border-dashed border-gray-300 py-10 text-center text-gray-600 dark:border-gray-600 dark:text-gray-300">No active calls</div>
               ) : (
                 activeCalls.map((call) => (
                   (() => {
@@ -396,9 +384,9 @@ import { io, Socket } from "socket.io-client";
                     return (
                   <div
                     key={call.id || call.roomId}
-                    className={`flex flex-col items-center justify-center rounded-lg p-6 ${theme.bg}`}
+                    className={`flex flex-col items-center justify-center rounded-2xl p-5 shadow-sm sm:p-6 ${theme.bg}`}
                   >
-                    <p className={`text-4xl font-bold ${theme.title}`}>
+                    <p className={`text-3xl font-bold sm:text-4xl ${theme.title}`}>
                       {call.roomName}
                     </p>
                     <p className={`mt-2 text-sm font-medium ${theme.sub}`}>
@@ -416,10 +404,10 @@ import { io, Socket } from "socket.io-client";
                     </p>
                     {/* Mute status UI and toggle */}
                     {call.muted !== undefined && (
-                      <div className="mt-2 flex flex-col items-center">
+                      <div className="mt-3 flex w-full flex-col items-center">
                         <p className={`text-xs font-semibold ${call.muted ? 'text-gray-500' : 'text-green-600'}`}>{call.muted ? 'Muted' : 'Unmuted'}</p>
                         <button
-                          className={`mt-1 rounded px-2 py-1 text-xs font-medium border ${call.muted ? 'bg-gray-200 text-gray-700 border-gray-400 dark:bg-gray-700 dark:text-gray-200' : 'bg-green-100 text-green-800 border-green-400 dark:bg-green-900 dark:text-green-200'}`}
+                          className={`mt-1.5 min-h-10 w-full max-w-[140px] rounded-xl px-3 py-2 text-sm font-medium border ${call.muted ? 'bg-gray-200 text-gray-700 border-gray-400 dark:bg-gray-700 dark:text-gray-200' : 'bg-green-100 text-green-800 border-green-400 dark:bg-green-900 dark:text-green-200'}`}
                           onClick={async () => {
                             try {
                               const organisationId = getOrganisationId();
@@ -448,7 +436,7 @@ import { io, Socket } from "socket.io-client";
                     )}
                     <button
                       type="button"
-                      className="mt-2 rounded px-2 py-1 text-xs font-medium border border-amber-500 bg-amber-50 text-amber-900 hover:bg-amber-100 dark:border-amber-600 dark:bg-amber-950 dark:text-amber-200 dark:hover:bg-amber-900"
+                      className="mt-2 min-h-10 w-full max-w-[140px] rounded-xl border border-amber-500 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900 hover:bg-amber-100 dark:border-amber-600 dark:bg-amber-950 dark:text-amber-200 dark:hover:bg-amber-900"
                       onClick={() => clearCallFromDashboard(call.id)}
                       title="Resolve call and record reset time in reports"
                     >
@@ -463,19 +451,19 @@ import { io, Socket } from "socket.io-client";
           </div>
 
           {/* Stats Grid */}
-          <div className="mb-12 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="mb-8 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
             {stats.map((stat) => (
-              <Card key={stat.label} className="dark:bg-gray-800">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-600 dark:text-gray-400">
+              <Card key={stat.label} className="rounded-2xl dark:bg-gray-800">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="truncate text-xs font-medium text-gray-600 dark:text-gray-400 sm:text-sm">
                       {stat.label}
                     </p>
-                    <p className="mt-2 text-3xl font-bold text-gray-900 dark:text-white">
+                    <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white sm:mt-2 sm:text-3xl">
                       {stat.value}
                     </p>
                   </div>
-                  <div className="rounded-lg bg-gray-100 p-3 dark:bg-gray-700">
+                  <div className="shrink-0 rounded-xl bg-teal-50 p-2.5 dark:bg-gray-700">
                     {stat.icon}
                   </div>
                 </div>
@@ -484,31 +472,31 @@ import { io, Socket } from "socket.io-client";
           </div>
 
           {/* Recent Activity and Quick Actions */}
-          <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-5 lg:grid-cols-3 lg:gap-8">
             {/* Recent Activity */}
             <div className="lg:col-span-2">
-              <Card className="dark:bg-gray-800">
-                <div className="mb-6 flex items-center justify-between">
-                  <h2 className="text-xl font-bold text-gray-900 dark:text-white">
+              <Card className="rounded-2xl dark:bg-gray-800">
+                <div className="mb-4 flex items-center justify-between gap-3 sm:mb-6">
+                  <h2 className="text-lg font-bold text-gray-900 dark:text-white sm:text-xl">
                     Recent Activity
                   </h2>
                   <a
                     href="/reports"
-                    className="text-sm text-blue-600 hover:underline dark:text-blue-400"
+                    className="text-sm font-medium text-teal-700 hover:underline dark:text-teal-400"
                   >
                     View all
                   </a>
                 </div>
-                <div className="space-y-4">
+                <div className="space-y-3 sm:space-y-4">
                   {recentHistory.length === 0 ? (
                     <div className="text-gray-500 dark:text-gray-400">No recent history</div>
                   ) : (
                     recentHistory.map((item) => (
                       <div
                         key={item.id}
-                        className="flex items-center justify-between border-b border-gray-200 py-4 last:border-b-0 dark:border-gray-700"
+                        className="flex flex-col gap-3 border-b border-gray-200 py-4 last:border-b-0 sm:flex-row sm:items-center sm:justify-between dark:border-gray-700"
                       >
-                        <div className="flex-1">
+                        <div className="min-w-0 flex-1">
                           <p className="font-medium text-gray-900 dark:text-white">
                             Call from {item.roomName}
                           </p>
@@ -516,12 +504,12 @@ import { io, Socket } from "socket.io-client";
                             {Math.floor((new Date().getTime() - new Date(item.timestamp).getTime()) / (1000 * 60))} minutes ago
                           </p>
                         </div>
-                        <div className="text-right space-y-1">
+                        <div className="space-y-1 sm:text-right">
                           {(() => {
                             const typeNum = getCallTypeNum(item);
                             return (
                               <span
-                                className={`inline-block rounded-full px-3 py-1 text-xs font-semibold ${
+                                className={`mr-2 inline-block rounded-full px-3 py-1 text-xs font-semibold sm:mr-0 ${
                                   typeNum === 2 || typeNum === 4 ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
                                   : typeNum === 3 ? "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
                                   : typeNum === 1 ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
@@ -553,14 +541,14 @@ import { io, Socket } from "socket.io-client";
 
             {/* Quick Actions */}
             <div>
-              <Card className="dark:bg-gray-800">
-                <h2 className="mb-6 text-xl font-bold text-gray-900 dark:text-white">
+              <Card className="rounded-2xl dark:bg-gray-800">
+                <h2 className="mb-4 text-lg font-bold text-gray-900 dark:text-white sm:mb-6 sm:text-xl">
                   Quick Actions
                 </h2>
                 <div className="space-y-3">
-                  <a href="/reports" className="flex w-full items-center gap-3 rounded-lg bg-blue-50 px-4 py-3 text-left hover:bg-blue-100 dark:bg-blue-900 dark:hover:bg-blue-800">
+                  <a href="/reports" className="flex min-h-12 w-full items-center gap-3 rounded-xl bg-teal-50 px-4 py-3 text-left hover:bg-teal-100 dark:bg-teal-950/50 dark:hover:bg-teal-900/60">
                     <svg
-                      className="h-5 w-5 text-blue-600"
+                      className="h-5 w-5 text-teal-700"
                       fill="none"
                       stroke="currentColor"
                       viewBox="0 0 24 24"
@@ -576,9 +564,9 @@ import { io, Socket } from "socket.io-client";
                       View Reports
                     </span>
                   </a>
-                  <a href="/settings" className="flex w-full items-center gap-3 rounded-lg bg-green-50 px-4 py-3 text-left hover:bg-green-100 dark:bg-green-900 dark:hover:bg-green-800">
+                  <a href="/settings" className="flex min-h-12 w-full items-center gap-3 rounded-xl bg-emerald-50 px-4 py-3 text-left hover:bg-emerald-100 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/50">
                     <svg
-                      className="h-5 w-5 text-green-600"
+                      className="h-5 w-5 text-emerald-600"
                       fill="none"
                       stroke="currentColor"
                       viewBox="0 0 24 24"
@@ -604,7 +592,6 @@ import { io, Socket } from "socket.io-client";
               </Card>
             </div>
           </div>
-        </div>
       </div>
     </div>
   );

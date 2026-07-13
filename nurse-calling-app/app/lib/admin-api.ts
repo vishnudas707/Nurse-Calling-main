@@ -1,6 +1,6 @@
 import { authHeaders } from "./auth";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5001";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://20.163.9.187:5001";
 
 export type ApiResult<T = unknown> = {
   ok: boolean;

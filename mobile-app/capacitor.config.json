@@ -1,0 +1,17 @@
+{
+  "appId": "com.nursecalling.app",
+  "appName": "Nurse Calling",
+  "webDir": "www",
+  "server": {
+    "url": "http://192.168.25.68:3000",
+    "cleartext": true,
+    "allowNavigation": [
+      "http://192.168.25.68:3000/*",
+      "http://20.163.9.187:3000/*",
+      "http://20.163.9.187:5001/*"
+    ]
+  },
+  "android": {
+    "allowMixedContent": true
+  }
+}

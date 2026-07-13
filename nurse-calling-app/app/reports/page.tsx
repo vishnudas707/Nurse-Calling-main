@@ -176,64 +176,62 @@ export default function ReportsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-white dark:bg-gray-900">
+    <div className="page-shell">
       <TopNavBar />
-      <div className="px-4 py-12 sm:px-6 lg:px-8">
-        <div className="mx-auto max-w-7xl">
-          <Card className="mb-8 dark:bg-gray-800">
-            <div className="flex flex-wrap gap-4 items-center">
+      <div className="page-container">
+          <Card className="mb-6 rounded-2xl dark:bg-gray-800 sm:mb-8">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <TextInput
                 placeholder="Search by Room or Call ID"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="min-w-[180px] flex-1"
+                className="w-full"
               />
-              <Select value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setPage(1); }} className="min-w-[140px] flex-1">
+              <Select value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setPage(1); }} className="w-full">
                 <option value="">All Statuses</option>
                 <option value="active">Active</option>
                 <option value="resolved">Resolved</option>
               </Select>
-              <Select value={mutedFilter} onChange={e => { setMutedFilter(e.target.value); setPage(1); }} className="min-w-[120px] flex-1">
+              <Select value={mutedFilter} onChange={e => { setMutedFilter(e.target.value); setPage(1); }} className="w-full">
                 <option value="">All</option>
                 <option value="true">Muted</option>
                 <option value="false">Unmuted</option>
               </Select>
-              <Select value={roomFilter} onChange={e => { setRoomFilter(e.target.value); setPage(1); }} className="min-w-[160px] flex-1">
+              <Select value={roomFilter} onChange={e => { setRoomFilter(e.target.value); setPage(1); }} className="w-full">
                 <option value="">All Rooms</option>
                 {rooms.map((room) => (
                   <option key={room.id} value={room.id}>{room.roomName}</option>
                 ))}
               </Select>
             </div>
-            <div className="flex flex-wrap gap-4 items-center mt-4">
-              <label className="text-gray-700 dark:text-gray-300">Start Date:</label>
-              <input type="date" value={startDate} onChange={e => { setStartDate(e.target.value); setPage(1); }} className="border rounded px-2 py-1 min-w-[140px] flex-1 dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
-              <span className="text-gray-500 dark:text-gray-300">to</span>
-              <label className="text-gray-700 dark:text-gray-300">End Date:</label>
-              <input type="date" value={endDate} onChange={e => { setEndDate(e.target.value); setPage(1); }} className="border rounded px-2 py-1 min-w-[140px] flex-1 dark:bg-gray-700 dark:border-gray-600 dark:text-white" />
-              <button onClick={exportExcel} className="px-3 py-1 bg-green-600 text-white rounded min-w-[120px]">Export Excel</button>
-              <button onClick={exportPDF} className="px-3 py-1 bg-blue-600 text-white rounded min-w-[120px]">Export PDF</button>
+            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:flex lg:flex-wrap lg:items-center">
+              <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Start Date</label>
+              <input type="date" value={startDate} onChange={e => { setStartDate(e.target.value); setPage(1); }} className="w-full rounded-xl border border-gray-300 px-3 py-2.5 dark:border-gray-600 dark:bg-gray-700 dark:text-white lg:w-auto" />
+              <label className="text-sm font-medium text-gray-700 dark:text-gray-300">End Date</label>
+              <input type="date" value={endDate} onChange={e => { setEndDate(e.target.value); setPage(1); }} className="w-full rounded-xl border border-gray-300 px-3 py-2.5 dark:border-gray-600 dark:bg-gray-700 dark:text-white lg:w-auto" />
+              <button onClick={exportExcel} className="touch-btn w-full bg-emerald-600 text-white hover:bg-emerald-700 sm:w-auto">Export Excel</button>
+              <button onClick={exportPDF} className="touch-btn w-full bg-teal-700 text-white hover:bg-teal-800 sm:w-auto">Export PDF</button>
             </div>
           </Card>
 
-          <Card className="mb-8 dark:bg-gray-800">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Summary Reports</h2>
-            <div className="flex flex-wrap gap-4">
+          <Card className="mb-6 rounded-2xl dark:bg-gray-800 sm:mb-8">
+            <h2 className="mb-4 text-lg font-semibold text-gray-900 dark:text-gray-100">Summary Reports</h2>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <Link
                 href="/reports/calls-per-day"
-                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg text-center min-w-[160px]"
+                className="touch-btn bg-teal-700 text-center text-white hover:bg-teal-800"
               >
                 Calls per Day
               </Link>
               <Link
                 href="/reports/calls-per-room"
-                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg text-center min-w-[160px]"
+                className="touch-btn bg-teal-700 text-center text-white hover:bg-teal-800"
               >
                 Calls per Room
               </Link>
               <Link
                 href="/reports/attending-lag"
-                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg text-center min-w-[160px]"
+                className="touch-btn bg-teal-700 text-center text-white hover:bg-teal-800"
               >
                 Attending Lag
               </Link>
@@ -282,7 +280,7 @@ export default function ReportsPage() {
             ) : paginatedCalls.length === 0 ? (
               <div className="text-center text-gray-600 dark:text-gray-300 py-8">No call history found</div>
             ) : (
-              <div className={`overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700 ${isRefreshing ? "opacity-70 pointer-events-none" : ""}`}>
+              <div className={`table-scroll rounded-xl border border-gray-200 dark:border-gray-700 ${isRefreshing ? "opacity-70 pointer-events-none" : ""}`}>
                 <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                   <thead className="bg-gray-50 dark:bg-gray-700 sticky top-0">
                     <tr>
@@ -375,7 +373,6 @@ export default function ReportsPage() {
               </div>
             )}
           </Card>
-        </div>
       </div>
     </div>
   );
