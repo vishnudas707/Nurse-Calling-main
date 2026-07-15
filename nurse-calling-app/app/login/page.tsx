@@ -139,24 +139,6 @@ export default function LoginPage() {
             />
           </div>
 
-          <div className="flex items-center justify-between gap-3">
-            <label className="flex min-h-11 items-center">
-              <input
-                type="checkbox"
-                className="h-4 w-4 rounded border-gray-300 text-teal-700 focus:ring-2 focus:ring-teal-500 dark:border-gray-600 dark:bg-gray-700"
-              />
-              <span className="ml-2 text-sm text-gray-600 dark:text-gray-300">
-                Remember me
-              </span>
-            </label>
-            <a
-              href="#"
-              className="text-sm font-medium text-teal-700 hover:underline dark:text-teal-400"
-            >
-              Forgot password?
-            </a>
-          </div>
-
           <button type="submit" disabled={isLoading} className="auth-primary-btn">
             {isLoading ? "Signing in..." : "Sign In"}
           </button>
