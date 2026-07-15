@@ -257,25 +257,6 @@ export default function RegisterPage() {
                 />
               </div>
 
-              <div className="flex items-start">
-                <label className="flex min-h-11 items-center">
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4 rounded border-gray-300 text-teal-700 focus:ring-2 focus:ring-teal-500 dark:border-gray-600 dark:bg-gray-700"
-                    required
-                  />
-                  <span className="ml-2 text-sm text-gray-600 dark:text-gray-300">
-                    I agree to the{" "}
-                    <a
-                      href="#"
-                      className="font-medium text-teal-700 hover:underline dark:text-teal-400"
-                    >
-                      terms and conditions
-                    </a>
-                  </span>
-                </label>
-              </div>
-
               <button type="submit" disabled={isLoading} className="auth-primary-btn">
                 {isLoading ? "Creating account..." : "Create Account"}
               </button>
