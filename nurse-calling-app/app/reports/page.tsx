@@ -128,7 +128,8 @@ export default function ReportsPage() {
 
   const exportExcel = async () => {
     const XLSX = await import("xlsx");
-    const { saveAs } = await import("file-saver");
+    const fileSaver = await import("file-saver");
+    const saveAs = fileSaver.saveAs ?? fileSaver.default;
     const ws = XLSX.utils.json_to_sheet(paginatedCalls.map(call => ({
       "Room": call.roomName,
       "Department": getDepartmentTypeName(Number(call.departmentType)),
