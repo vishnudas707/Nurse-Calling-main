@@ -126,15 +126,9 @@ export default function RegisterPage() {
               <span className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-teal-700 text-base font-bold text-white shadow-md">
                 CC
               </span>
-              <p className="text-sm font-semibold tracking-wide text-teal-700 dark:text-teal-400">
-                Care Call
-              </p>
               <h1 className="mt-2 text-2xl font-bold text-gray-900 dark:text-white sm:text-3xl">
                 Create account
               </h1>
-              <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
-                Sign up for your organisation&apos;s nurse dashboard
-              </p>
             </div>
 
             {error && (
@@ -201,10 +195,6 @@ export default function RegisterPage() {
                   placeholder="e.g. ORG001"
                   required
                 />
-                <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">
-                  Use the ID provided by your hospital. Users with the same ID
-                  share one dashboard.
-                </p>
               </div>
 
               <div>
