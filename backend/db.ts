@@ -6,6 +6,7 @@ const config: sql.config = {
   server: process.env.DB_SERVER || '20.163.9.187',
   database: process.env.DB_DATABASE || 'care-call',
   port: Number(process.env.DB_PORT) || 1433,
+  requestTimeout: Number(process.env.DB_REQUEST_TIMEOUT) || 60000,
   options: {
     encrypt: process.env.DB_ENCRYPT === 'true' || false,
     trustServerCertificate: process.env.DB_TRUST_CERT === 'true' || true,
