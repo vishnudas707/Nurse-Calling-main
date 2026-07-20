@@ -6,7 +6,7 @@ import TopNavBar from "../components/navbar";
 import { Card } from "flowbite-react";
 import { getOrganisationId } from "../lib/auth";
 import { getCallTypeName, MISCELLANEOUS_CALL_TYPE } from "../lib/constants";
-import { getCallStateLabel, toDayKey, getResolvedStatusClassName } from "../reports/lib/report-utils";
+import { getCallStateLabel, toDayKey, getResolvedStatusClassName, getLocalDayRange } from "../reports/lib/report-utils";
 
 import { useEffect, useState, useCallback } from "react";
 import { io, Socket } from "socket.io-client";
@@ -200,7 +200,14 @@ import { io, Socket } from "socket.io-client";
 
       const orgId = getOrganisationId();
       setOrganisationId(orgId);
-      const orgQuery = orgId ? `?organisationId=${encodeURIComponent(orgId)}` : "";
+      if (!orgId) {
+        setError("Organisation not found. Please log in again.");
+        setIsLoading(false);
+        return () => {
+          window.clearInterval(tickId);
+        };
+      }
+      const orgQuery = `?organisationId=${encodeURIComponent(orgId)}`;
 
       const fetchOrganisationName = async () => {
         if (!orgId) return;
@@ -236,12 +243,10 @@ import { io, Socket } from "socket.io-client";
       fetchActiveCalls();
   
       const fetchTodayHistory = async () => {
-        const day = toDayKey(new Date());
-        const todayStart = `${day}T00:00:00.000`;
-        const todayEnd = `${day}T23:59:59.999`;
+        const { start: todayStart, end: todayEnd } = getLocalDayRange(new Date());
         try {
           const resp = await fetch(
-            `${API_BASE}/api/calls/history${orgQuery ? orgQuery + "&" : "?"}resetStartDate=${encodeURIComponent(todayStart)}&resetEndDate=${encodeURIComponent(todayEnd)}&status=resolved&page=1&pageSize=10000`
+            `${API_BASE}/api/calls/history${orgQuery}&resetStartDate=${encodeURIComponent(todayStart)}&resetEndDate=${encodeURIComponent(todayEnd)}&status=resolved&page=1&pageSize=10000`
           );
           const data = await resp.json();
           if (resp.ok && data.success) {
@@ -255,7 +260,7 @@ import { io, Socket } from "socket.io-client";
       const fetchRecentHistory = async () => {
         try {
           const resp = await fetch(
-            `${API_BASE}/api/calls/history${orgQuery ? orgQuery + "&" : "?"}page=1&pageSize=5`
+            `${API_BASE}/api/calls/history${orgQuery}&page=1&pageSize=5`
           );
           const data = await resp.json();
           if (resp.ok && data.success) {
@@ -287,6 +292,7 @@ import { io, Socket } from "socket.io-client";
       // Listen for call events with try-catch
       s.on("call:new", (call) => {
         try {
+          if (call?.organisationId && call.organisationId !== orgId) return;
           if (call?.callType === MISCELLANEOUS_CALL_TYPE) return;
           console.log('[SocketIO] Received call:new', call);
           setActiveCalls((prev) => {

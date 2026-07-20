@@ -4,16 +4,20 @@ export const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://20.163.9.187:
 
 function organisationQueryPrefix() {
   const orgId = getOrganisationId();
-  return orgId ? `?organisationId=${encodeURIComponent(orgId)}` : "";
+  if (!orgId) return null;
+  return `?organisationId=${encodeURIComponent(orgId)}`;
 }
 
 export function roomsApiUrl() {
-  return `${API_BASE}/api/rooms${organisationQueryPrefix()}`;
+  const prefix = organisationQueryPrefix();
+  if (!prefix) throw new Error("Organisation ID is required");
+  return `${API_BASE}/api/rooms${prefix}`;
 }
 
 export function callsHistoryUrl(query: string) {
   const prefix = organisationQueryPrefix();
-  return `${API_BASE}/api/calls/history${prefix ? prefix + "&" : "?"}${query}`;
+  if (!prefix) throw new Error("Organisation ID is required");
+  return `${API_BASE}/api/calls/history${prefix}&${query}`;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -25,6 +29,7 @@ const ROOMS_CACHE_MS = 5 * 60 * 1000;
 
 export async function fetchRoomsCached(signal?: AbortSignal): Promise<CallRecord[]> {
   const orgKey = getOrganisationId() || "";
+  if (!orgKey) return [];
   const now = Date.now();
   if (roomsCache && roomsCache.orgKey === orgKey && now - roomsCache.ts < ROOMS_CACHE_MS) {
     return roomsCache.rooms;
@@ -65,11 +70,26 @@ export function buildCallsHistoryParams(
   return params.join("&");
 }
 
+/** Local calendar day bounds (12:00 AM – 11:59:59 PM) as ISO strings for the API. */
+export function getLocalDayRange(date = new Date()) {
+  const y = date.getFullYear();
+  const m = date.getMonth();
+  const d = date.getDate();
+  return {
+    start: new Date(y, m, d, 0, 0, 0, 0).toISOString(),
+    end: new Date(y, m, d, 23, 59, 59, 999).toISOString(),
+  };
+}
+
 function normalizeDateFilter(value: string | undefined, mode: "start" | "end") {
   if (!value) return "";
   const trimmed = value.trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
-  return mode === "start" ? `${trimmed}T00:00:00.000` : `${trimmed}T23:59:59.999`;
+  const [y, m, d] = trimmed.split("-").map(Number);
+  if (mode === "start") {
+    return new Date(y, m - 1, d, 0, 0, 0, 0).toISOString();
+  }
+  return new Date(y, m - 1, d, 23, 59, 59, 999).toISOString();
 }
 
 export function toDayKey(value: unknown) {

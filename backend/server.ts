@@ -711,13 +711,14 @@ const ROOM_TABLE = 'Room';
 app.get("/api/rooms", async (req: Request, res: Response) => {
   try {
     const { organisationId } = req.query;
+    if (!organisationId) {
+      return res.status(400).json({ success: false, error: "organisationId is required" });
+    }
     const pool = await getPool();
     const request = pool.request();
     let query = `SELECT * FROM [${ROOM_TABLE}] WHERE active = 1`;
-    if (organisationId) {
-      request.input('organisationId', sql.NVarChar(50), String(organisationId));
-      query += ` AND organisationId = @organisationId`;
-    }
+    request.input('organisationId', sql.NVarChar(50), String(organisationId));
+    query += ` AND organisationId = @organisationId`;
     query += ` ORDER BY id`;
     const result = await request.query(query);
     
@@ -923,18 +924,19 @@ app.delete("/api/rooms/:id", async (req: Request, res: Response) => {
 app.get("/api/calls/active", async (req: Request, res: Response) => {
   try {
     const { organisationId } = req.query;
+    if (!organisationId) {
+      return res.status(400).json({ success: false, error: "organisationId is required" });
+    }
     console.log('[CALLS ACTIVE] Fetching active calls from DB with room name join', { organisationId });
     const pool = await getPool();
     const request = pool.request();
     let query =
-      `SELECT cs.[id], cs.[roomId], cs.[currentStatus], cs.[callType], cs.[dateTime], cs.[isMuted], cs.[dateTimeReset], r.[roomName]
+      `SELECT cs.[id], cs.[roomId], cs.[currentStatus], cs.[callType], cs.[dateTime], cs.[isMuted], cs.[dateTimeReset], r.[roomName], r.[organisationId]
        FROM [CallStatus] cs
-       LEFT JOIN [Room] r ON cs.[roomId] = r.[id]
+       INNER JOIN [Room] r ON cs.[roomId] = r.[id]
        WHERE cs.[currentStatus] <> 0 AND ISNULL(cs.[callType], cs.[currentStatus]) <> ${MISCELLANEOUS_CALL_TYPE}`;
-    if (organisationId) {
-      request.input('organisationId', sql.NVarChar(50), String(organisationId));
-      query += ` AND r.[organisationId] = @organisationId`;
-    }
+    request.input('organisationId', sql.NVarChar(50), String(organisationId));
+    query += ` AND r.[organisationId] = @organisationId`;
     query += ` ORDER BY cs.[dateTime] DESC`;
     const result = await request.query(query);
     const now = Date.now();
@@ -949,6 +951,7 @@ app.get("/api/calls/active", async (req: Request, res: Response) => {
         minutesAgo: row.dateTime ? Math.floor((now - new Date(row.dateTime).getTime()) / 60000) : null,
         muted: row.isMuted === 1 || row.isMuted === true,
         dateTimeReset: row.dateTimeReset,
+        organisationId: row.organisationId || String(organisationId),
       }))
     );
     res.status(200).json({
@@ -1162,6 +1165,9 @@ app.put("/api/calls/:id", async (req: Request, res: Response) => {
 app.get("/api/calls/history", async (req: Request, res: Response) => {
   try {
     const { startDate, endDate, resetStartDate, resetEndDate, search, status, room, muted, organisationId, page = 1, pageSize = 10 } = req.query;
+    if (!organisationId) {
+      return res.status(400).json({ success: false, error: "organisationId is required" });
+    }
     const pool = await getPool();
     const repeatEnabled = await hasCallRepeatTable(pool);
     const activityLogEnabled = await hasActivityLogTable(pool);
@@ -1244,10 +1250,8 @@ app.get("/api/calls/history", async (req: Request, res: Response) => {
       where.push('cs.[isMuted] = @muted');
       params.push({ name: 'muted', type: sql.Bit, value: muted === 'true' ? 1 : 0 });
     }
-    if (organisationId) {
-      where.push('r.[organisationId] = @organisationId');
-      params.push({ name: 'organisationId', type: sql.NVarChar(50), value: String(organisationId) });
-    }
+    where.push('r.[organisationId] = @organisationId');
+    params.push({ name: 'organisationId', type: sql.NVarChar(50), value: String(organisationId) });
     if (where.length > 0) {
       query += ' WHERE ' + where.join(' AND ');
     }
@@ -1411,7 +1415,8 @@ async function processCallStatusForRoom(
       timestamp: existing.dateTime || new Date(),
       muted: existing.isMuted === 1 || existing.isMuted === true,
       dateTimeReset: existing.dateTimeReset,
-      minutesAgo: 0
+      minutesAgo: 0,
+      organisationId: orgId,
     })));
 
     await writeActivityLog(pool, {
@@ -1485,7 +1490,8 @@ async function processCallStatusForRoom(
     timestamp: now,
     muted: false,
     dateTimeReset: isActivate ? null : now,
-    minutesAgo: 0
+    minutesAgo: 0,
+    organisationId: orgId,
   })));
   await writeActivityLog(pool, {
     organisationId: orgId,

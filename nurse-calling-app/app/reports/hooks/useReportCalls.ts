@@ -33,10 +33,14 @@ export function useReportCalls(filters: ReportFilterParams) {
         if (callsResp.ok && callsData.success) {
           setAllCalls(sortCallsForReportTable(callsData.data || []));
         } else {
-          setError("Failed to fetch data");
+          setError(callsData.error || "Failed to fetch data");
         }
       } catch (err: unknown) {
         if (err instanceof Error && err.name === "AbortError") return;
+        if (err instanceof Error && err.message === "Organisation ID is required") {
+          setError("Organisation not found. Please log in again.");
+          return;
+        }
         setError("Error connecting to server");
       } finally {
         setIsLoading(false);

@@ -73,7 +73,12 @@ export default function SettingsPage() {
       setIsLoading(true);
       setError("");
       const orgId = getOrganisationId();
-      const orgQuery = orgId ? `?organisationId=${encodeURIComponent(orgId)}` : "";
+      if (!orgId) {
+        setError("Organisation not found. Please log in again.");
+        setIsLoading(false);
+        return;
+      }
+      const orgQuery = `?organisationId=${encodeURIComponent(orgId)}`;
       const resp = await fetch(`${API_BASE}/api/rooms${orgQuery}`);
       const data = await resp.json();
       if (resp.ok && data.success) {
