@@ -70,7 +70,7 @@ export function buildCallsHistoryParams(
   return params.join("&");
 }
 
-/** Local calendar day bounds (12:00 AM – 11:59:59 PM) as ISO strings for the API. */
+/** Local calendar day bounds (12:00 AM - 11:59:59 PM) as ISO strings for the API. */
 export function getLocalDayRange(date = new Date()) {
   const y = date.getFullYear();
   const m = date.getMonth();
