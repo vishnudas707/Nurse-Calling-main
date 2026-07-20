@@ -40,9 +40,11 @@ export default function TopNavBar() {
   const links = showSuperAdmin ? adminLinks : userLinks;
   const homeHref = showSuperAdmin ? "/super-admin/organisations" : "/dashboard";
 
-  const linkClass = (href: string) => {
+  const linkClass = (href: string, compact = false) => {
     const active = pathname === href || pathname.startsWith(`${href}/`);
-    return `rounded-xl px-3 py-2.5 text-sm font-medium transition ${
+    return `rounded-xl text-sm font-medium transition ${
+      compact ? "px-3 py-2 whitespace-nowrap" : "px-3 py-2.5"
+    } ${
       active
         ? "bg-teal-700 text-white"
         : "text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700"
@@ -101,6 +103,19 @@ export default function TopNavBar() {
             )}
           </button>
         </div>
+      </div>
+
+      {/* Mobile: page links always visible at top */}
+      <div className="border-t border-gray-100 px-3 pb-3 pt-1 dark:border-gray-800 md:hidden">
+        <ul className="-mx-1 flex gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {links.map((link) => (
+            <li key={link.href} className="shrink-0">
+              <Link href={link.href} className={`block ${linkClass(link.href, true)}`}>
+                {link.label}
+              </Link>
+            </li>
+          ))}
+        </ul>
       </div>
 
       {menuOpen && (
