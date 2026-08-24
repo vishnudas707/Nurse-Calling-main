@@ -1,4 +1,3 @@
-
 import express, { Express, Request, Response, NextFunction } from "express";
 import http from "http";
 import { Server as SocketIOServer } from "socket.io";
@@ -6,7 +5,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
-import { getPool, sql } from "./db";
+import { getPool, closePool, getPoolStats, sql } from "./db";
 import {
   ROOM_TYPE_MAP,
   DEPARTMENT_TYPE_MAP,
@@ -121,13 +120,22 @@ async function hasActivityLogTable(pool: Awaited<ReturnType<typeof getPool>>): P
   }
 }
 
+// Organisation names are looked up on every activity-log write, which is once
+// per device call. Cache them briefly so that lookup is not a per-call query.
+const ORG_NAME_TTL_MS = 5 * 60 * 1000;
+const orgNameCache = new Map<string, { name: string; expiresAt: number }>();
+
 async function getOrganisationName(pool: Awaited<ReturnType<typeof getPool>>, orgId?: string | null) {
   if (!orgId) return null;
+  const cached = orgNameCache.get(orgId);
+  if (cached && cached.expiresAt > Date.now()) return cached.name;
   try {
     const r = await pool.request()
       .input("id", sql.NVarChar(50), orgId)
       .query(`SELECT name FROM [${ORGANISATION_TABLE}] WHERE id = @id`);
-    return r.recordset[0]?.name || orgId;
+    const name = r.recordset[0]?.name || orgId;
+    orgNameCache.set(orgId, { name, expiresAt: Date.now() + ORG_NAME_TTL_MS });
+    return name;
   } catch {
     return orgId;
   }
@@ -170,6 +178,171 @@ async function hasCallRepeatTable(pool: any): Promise<boolean> {
     console.error('[CallRepeat] Table existence check failed:', err);
     callRepeatTableCache = false;
     return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Organisation hardware IDs (HIDs)
+//
+// An organisation can own several devices, so its HIDs live in their own table
+// instead of the single [Organisation].hid column. That column is kept in sync
+// with the first HID so anything still reading it keeps working.
+//
+// As with CallRepeat, the service user may not have DDL rights in production:
+// we try to create the table once, and every caller degrades to the legacy
+// single-column behaviour when it is not there. See migrations/organisation-hid.sql
+// for the statements to run by hand in that case.
+const ORGANISATION_HID_TABLE = "OrganisationHid";
+let organisationHidTableCache: boolean | null = null;
+
+async function ensureOrganisationHidTable(pool: any): Promise<boolean> {
+  if (organisationHidTableCache !== null) return organisationHidTableCache;
+  try {
+    const existing = await pool
+      .request()
+      .query(`SELECT OBJECT_ID(N'[dbo].[${ORGANISATION_HID_TABLE}]', N'U') AS objId`);
+    if (existing?.recordset?.[0]?.objId) {
+      organisationHidTableCache = true;
+      return true;
+    }
+  } catch (err) {
+    console.error("[OrganisationHid] Table existence check failed:", err);
+    organisationHidTableCache = false;
+    return false;
+  }
+
+  try {
+    await pool.request().query(
+      `CREATE TABLE [dbo].[${ORGANISATION_HID_TABLE}] (
+         id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+         organisationId NVARCHAR(50) NOT NULL,
+         hid NVARCHAR(20) NOT NULL,
+         createdAt DATETIME NOT NULL CONSTRAINT DF_OrganisationHid_createdAt DEFAULT GETDATE()
+       );
+       CREATE INDEX IX_OrganisationHid_organisationId
+         ON [dbo].[${ORGANISATION_HID_TABLE}] (organisationId);`
+    );
+    // Carry the existing single HIDs over so nothing disappears from the admin
+    // page the first time this runs.
+    await pool.request().query(
+      `INSERT INTO [dbo].[${ORGANISATION_HID_TABLE}] (organisationId, hid)
+       SELECT id, CONVERT(NVARCHAR(20), hid) FROM [${ORGANISATION_TABLE}] WHERE hid IS NOT NULL`
+    );
+    console.log("[OrganisationHid] Table created and backfilled");
+    organisationHidTableCache = true;
+    return true;
+  } catch (err) {
+    console.error(
+      "[OrganisationHid] Table creation failed, falling back to the single Organisation.hid column:",
+      err
+    );
+    organisationHidTableCache = false;
+    return false;
+  }
+}
+
+const HID_PATTERN = /^\d{10}$/;
+
+/**
+ * Accepts either the new `hids: string[]` payload or the legacy scalar `hid`,
+ * and returns the cleaned, de-duplicated list.
+ */
+function normaliseHidPayload(body: { hids?: unknown; hid?: unknown }):
+  | { ok: true; hids: string[] }
+  | { ok: false; error: string } {
+  const raw = Array.isArray(body.hids)
+    ? body.hids
+    : body.hids != null
+      ? [body.hids]
+      : body.hid != null
+        ? [body.hid]
+        : [];
+
+  const hids: string[] = [];
+  for (const entry of raw) {
+    const value = String(entry ?? "").trim();
+    if (!value) continue;
+    if (!HID_PATTERN.test(value)) {
+      return { ok: false, error: `hid must be a 10-digit number (got "${value}")` };
+    }
+    if (!hids.includes(value)) hids.push(value);
+  }
+  return { ok: true, hids };
+}
+
+/** HIDs per organisation, keyed by organisation id. */
+async function getOrganisationHids(pool: any, organisationId?: string): Promise<Map<string, string[]>> {
+  const byOrg = new Map<string, string[]>();
+  if (!(await ensureOrganisationHidTable(pool))) return byOrg;
+  const request = pool.request();
+  let query = `SELECT organisationId, hid FROM [${ORGANISATION_HID_TABLE}]`;
+  if (organisationId) {
+    request.input("organisationId", sql.NVarChar(50), organisationId);
+    query += ` WHERE organisationId = @organisationId`;
+  }
+  query += ` ORDER BY organisationId, id`;
+  const result = await request.query(query);
+  for (const row of result.recordset) {
+    const list = byOrg.get(row.organisationId) || [];
+    list.push(String(row.hid));
+    byOrg.set(row.organisationId, list);
+  }
+  return byOrg;
+}
+
+/** Adds `hids` to an organisation row, falling back to its own `hid` column. */
+function withHids(org: any, byOrg: Map<string, string[]>) {
+  const stored = byOrg.get(org.id);
+  const hids = stored && stored.length ? stored : org.hid != null ? [String(org.hid)] : [];
+  return { ...org, hid: hids[0] ?? null, hids };
+}
+
+/** Rejects HIDs already claimed by a different organisation. */
+async function findConflictingHid(
+  pool: any,
+  organisationId: string,
+  hids: string[]
+): Promise<string | null> {
+  if (!hids.length) return null;
+  const request = pool.request();
+  request.input("organisationId", sql.NVarChar(50), organisationId);
+  const params = hids.map((hid, i) => {
+    request.input(`hid${i}`, sql.NVarChar(20), hid);
+    return `@hid${i}`;
+  });
+
+  if (await ensureOrganisationHidTable(pool)) {
+    const inTable = await request.query(
+      `SELECT TOP 1 hid FROM [${ORGANISATION_HID_TABLE}]
+       WHERE organisationId <> @organisationId AND hid IN (${params.join(", ")})`
+    );
+    if (inTable.recordset.length) return String(inTable.recordset[0].hid);
+    return null;
+  }
+
+  const inColumn = await request.query(
+    `SELECT TOP 1 hid FROM [${ORGANISATION_TABLE}]
+     WHERE id <> @organisationId AND CONVERT(NVARCHAR(20), hid) IN (${params.join(", ")})`
+  );
+  return inColumn.recordset.length ? String(inColumn.recordset[0].hid) : null;
+}
+
+/**
+ * Replaces an organisation's HIDs. [Organisation].hid keeps the first one so
+ * existing readers of that column still see a valid device id.
+ */
+async function saveOrganisationHids(pool: any, organisationId: string, hids: string[]) {
+  if (!(await ensureOrganisationHidTable(pool))) return;
+  const deleteReq = pool.request();
+  deleteReq.input("organisationId", sql.NVarChar(50), organisationId);
+  await deleteReq.query(`DELETE FROM [${ORGANISATION_HID_TABLE}] WHERE organisationId = @organisationId`);
+  for (const hid of hids) {
+    const insertReq = pool.request();
+    insertReq.input("organisationId", sql.NVarChar(50), organisationId);
+    insertReq.input("hid", sql.NVarChar(20), hid);
+    await insertReq.query(
+      `INSERT INTO [${ORGANISATION_HID_TABLE}] (organisationId, hid) VALUES (@organisationId, @hid)`
+    );
   }
 }
 
@@ -357,7 +530,11 @@ app.get("/api/admin/organisations", requireSuperAdmin, async (_req: Request, res
     const result = await pool.request().query(
       `SELECT id, name, address, phoneNo, contactPerson, hid FROM [${ORGANISATION_TABLE}] ORDER BY id`
     );
-    return res.status(200).json({ success: true, data: result.recordset });
+    const hidsByOrg = await getOrganisationHids(pool);
+    return res.status(200).json({
+      success: true,
+      data: result.recordset.map((org: any) => withHids(org, hidsByOrg)),
+    });
   } catch (err) {
     console.error("[ADMIN ORGANISATIONS GET] Error:", err);
     return res.status(500).json({ success: false, error: "Failed to fetch organisations" });
@@ -366,20 +543,29 @@ app.get("/api/admin/organisations", requireSuperAdmin, async (_req: Request, res
 
 app.post("/api/admin/organisations", requireSuperAdmin, async (req: AuthRequest, res: Response) => {
   try {
-    const { id, name, address, phoneNo, contactPerson, hid } = req.body;
+    const { id, name, address, phoneNo, contactPerson } = req.body;
     if (!id || !name) {
       return res.status(400).json({ success: false, error: "id and name are required" });
     }
-    const hidStr = hid ? String(hid) : null;
-    if (hidStr && !/^\d{10}$/.test(hidStr)) {
-      return res.status(400).json({ success: false, error: "hid must be a 10-digit number" });
+    const parsedHids = normaliseHidPayload(req.body);
+    if (!parsedHids.ok) {
+      return res.status(400).json({ success: false, error: parsedHids.error });
     }
+    const hids = parsedHids.hids;
+    const hidStr = hids[0] ?? null;
     const pool = await getPool();
     const exists = await pool.request()
       .input("id", sql.NVarChar(50), id)
       .query(`SELECT id FROM [${ORGANISATION_TABLE}] WHERE id = @id`);
     if (exists.recordset.length > 0) {
       return res.status(409).json({ success: false, error: "Organisation with this id already exists" });
+    }
+    const conflict = await findConflictingHid(pool, id, hids);
+    if (conflict) {
+      return res.status(409).json({
+        success: false,
+        error: `Hardware ID ${conflict} is already assigned to another organisation`,
+      });
     }
     const insertReq = pool.request();
     insertReq.input("id", sql.NVarChar(50), id);
@@ -392,6 +578,7 @@ app.post("/api/admin/organisations", requireSuperAdmin, async (req: AuthRequest,
       `INSERT INTO [${ORGANISATION_TABLE}] (id, name, address, phoneNo, contactPerson, hid)
        VALUES (@id, @name, @address, @phoneNo, @contactPerson, @hid)`
     );
+    await saveOrganisationHids(pool, id, hids);
     await writeActivityLog(pool, {
       organisationId: id,
       organisationName: name,
@@ -401,10 +588,11 @@ app.post("/api/admin/organisations", requireSuperAdmin, async (req: AuthRequest,
       message: `Organisation created: ${name}`,
       actorId: req.authUser?.id,
       actorName: "Super Admin",
+      details: { hids },
     });
     return res.status(201).json({
       success: true,
-      data: { id, name, address: address || null, phoneNo: phoneNo || null, contactPerson: contactPerson || null, hid: hidStr },
+      data: { id, name, address: address || null, phoneNo: phoneNo || null, contactPerson: contactPerson || null, hid: hidStr, hids },
     });
   } catch (err) {
     console.error("[ADMIN ORGANISATIONS POST] Error:", err);
@@ -415,20 +603,29 @@ app.post("/api/admin/organisations", requireSuperAdmin, async (req: AuthRequest,
 app.put("/api/admin/organisations/:id", requireSuperAdmin, async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
-    const { name, address, phoneNo, contactPerson, hid } = req.body;
+    const { name, address, phoneNo, contactPerson } = req.body;
     if (!name) {
       return res.status(400).json({ success: false, error: "name is required" });
     }
-    const hidStr = hid ? String(hid) : null;
-    if (hidStr && !/^\d{10}$/.test(hidStr)) {
-      return res.status(400).json({ success: false, error: "hid must be a 10-digit number" });
+    const parsedHids = normaliseHidPayload(req.body);
+    if (!parsedHids.ok) {
+      return res.status(400).json({ success: false, error: parsedHids.error });
     }
+    const hids = parsedHids.hids;
+    const hidStr = hids[0] ?? null;
     const pool = await getPool();
     const exists = await pool.request()
       .input("id", sql.NVarChar(50), id)
       .query(`SELECT id FROM [${ORGANISATION_TABLE}] WHERE id = @id`);
     if (!exists.recordset.length) {
       return res.status(404).json({ success: false, error: "Organisation not found" });
+    }
+    const conflict = await findConflictingHid(pool, id, hids);
+    if (conflict) {
+      return res.status(409).json({
+        success: false,
+        error: `Hardware ID ${conflict} is already assigned to another organisation`,
+      });
     }
     const updateReq = pool.request();
     updateReq.input("id", sql.NVarChar(50), id);
@@ -442,6 +639,8 @@ app.put("/api/admin/organisations/:id", requireSuperAdmin, async (req: AuthReque
        SET name = @name, address = @address, phoneNo = @phoneNo, contactPerson = @contactPerson, hid = @hid
        WHERE id = @id`
     );
+    await saveOrganisationHids(pool, id, hids);
+    orgNameCache.set(id, { name, expiresAt: Date.now() + ORG_NAME_TTL_MS });
     await writeActivityLog(pool, {
       organisationId: id,
       organisationName: name,
@@ -451,10 +650,11 @@ app.put("/api/admin/organisations/:id", requireSuperAdmin, async (req: AuthReque
       message: `Organisation updated: ${name}`,
       actorId: req.authUser?.id,
       actorName: "Super Admin",
+      details: { hids },
     });
     return res.status(200).json({
       success: true,
-      data: { id, name, address: address || null, phoneNo: phoneNo || null, contactPerson: contactPerson || null, hid: hidStr },
+      data: { id, name, address: address || null, phoneNo: phoneNo || null, contactPerson: contactPerson || null, hid: hidStr, hids },
     });
   } catch (err) {
     console.error("[ADMIN ORGANISATIONS PUT] Error:", err);
@@ -479,9 +679,11 @@ app.delete("/api/admin/organisations/:id", requireSuperAdmin, async (req: AuthRe
     if (users.recordset[0]?.cnt > 0) {
       return res.status(409).json({ success: false, error: "Cannot delete organisation with linked users" });
     }
+    await saveOrganisationHids(pool, id, []);
     await pool.request()
       .input("id", sql.NVarChar(50), id)
       .query(`DELETE FROM [${ORGANISATION_TABLE}] WHERE id = @id`);
+    orgNameCache.delete(id);
     await writeActivityLog(pool, {
       organisationId: id,
       organisationName: orgName,
@@ -697,7 +899,8 @@ app.get("/api/organisations/:id", async (req: Request, res: Response) => {
     if (!result.recordset.length) {
       return res.status(404).json({ success: false, error: "Organisation not found" });
     }
-    return res.status(200).json({ success: true, data: result.recordset[0] });
+    const hidsByOrg = await getOrganisationHids(pool, id);
+    return res.status(200).json({ success: true, data: withHids(result.recordset[0], hidsByOrg) });
   } catch (err) {
     console.error("[ORGANISATIONS GET/:id] Error:", err);
     return res.status(500).json({ success: false, error: "Failed to fetch organisation" });
@@ -1373,12 +1576,14 @@ async function processCallStatusForRoom(
     .input('roomNo_deviceNo', sql.NVarChar(100), dnum)
     .input('floor', sql.Int, Number(floor))
     .query(
-      `SELECT id FROM [Room] WHERE organisationId = @organisationId AND roomNo_deviceNo = @roomNo_deviceNo AND floor = @floor`
+      `SELECT id, roomName FROM [Room] WHERE organisationId = @organisationId AND roomNo_deviceNo = @roomNo_deviceNo AND floor = @floor`
     );
   if (!roomResult.recordset.length) {
     return { httpStatus: 404, result: "FAILURE", error: `Room not found for room ${dnum} on floor ${floor}` };
   }
   const roomId = roomResult.recordset[0].id;
+  // Fetched with the id above so the emit paths below need no extra round trip.
+  const roomName: string = roomResult.recordset[0].roomName || '';
 
   if (isMiscellaneous) {
     return insertMiscellaneousCall(pool, roomId, dnum);
@@ -1402,9 +1607,6 @@ async function processCallStatusForRoom(
         console.error('[CALLSTATUS INSERT] Failed to log repeat:', repeatErr);
       }
     }
-
-    const roomInfo = await pool.request().input('id', sql.NVarChar(50), roomId).query(`SELECT roomName FROM [Room] WHERE id = @id`);
-    const roomName = roomInfo.recordset.length ? roomInfo.recordset[0].roomName : '';
 
     io.to(`org_${orgId}`).emit("call:new", withCallTypeFields(withCallStatusFields({
       id: existing.id,
@@ -1479,8 +1681,6 @@ async function processCallStatusForRoom(
   else { insertReq.input("dateTimeReset", sql.DateTime, now); }
   const insertQuery = `INSERT INTO [CallStatus] (id, roomId, currentStatus, callType, dateTime, isMuted, mutedDateTime, dateTimeReset) VALUES (@id, @roomId, @currentStatus, @callType, @dateTime, @isMuted, @mutedDateTime, @dateTimeReset)`;
   await insertReq.query(insertQuery);
-  const roomInfo = await pool.request().input('id', sql.NVarChar(50), roomId).query(`SELECT roomName FROM [Room] WHERE id = @id`);
-  const roomName = roomInfo.recordset.length ? roomInfo.recordset[0].roomName : '';
   io.to(`org_${orgId}`).emit("call:new", withCallTypeFields(withCallStatusFields({
     id: callId,
     roomId,
@@ -1583,6 +1783,8 @@ app.get("/api/health", (req: Request, res: Response) => {
   res.status(200).json({
     success: true,
     message: "Server is running",
+    uptimeSeconds: Math.round(process.uptime()),
+    dbPool: getPoolStats(),
   });
 });
 
@@ -1594,33 +1796,8 @@ app.get('/api/test-db', async (req: Request, res: Response) => {
 
     // Try a simple query against the user table
     try {
-      const r = await pool.request().query(`SELECT TOP 1 * FROM ${table}`);
-      return res.status(200).json({ success: true, message: 'DB connected', rows: r.recordset.length, sample: r.recordset[0] || null });
-    } catch (innerErr) {
-      // If the table doesn't exist or query fails, try a generic select 1
-      try {
-        const r2 = await pool.request().query('SELECT 1 AS ok');
-        return res.status(200).json({ success: true, message: 'DB connected (fallback query)', sample: r2.recordset[0] });
-      } catch (innerErr2) {
-        console.error('DB fallback query failed', innerErr2);
-        return res.status(500).json({ success: false, error: String(innerErr2) });
-      }
-    }
-  } catch (err) {
-    console.error('DB connection error', err);
-    return res.status(500).json({ success: false, error: String(err) });
-  }
-});
-
-// Test DB connectivity
-app.get('/api/test-db', async (req: Request, res: Response) => {
-  try {
-    const pool = await getPool();
-    const table = process.env.USER_TABLE || 'User';
-
-    // Try a simple query against the user table
-    try {
-      const r = await pool.request().query(`SELECT TOP 1 * FROM ${table}`);
+      // Bracketed: the default table name is "User", a reserved word.
+      const r = await pool.request().query(`SELECT TOP 1 * FROM [${table}]`);
       return res.status(200).json({ success: true, message: 'DB connected', rows: r.recordset.length, sample: r.recordset[0] || null });
     } catch (innerErr) {
       // If the table doesn't exist or query fails, try a generic select 1
@@ -1641,4 +1818,36 @@ app.get('/api/test-db', async (req: Request, res: Response) => {
 // Start server
 server.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`);
+  // Warm the pool so the first device call is not paying connect latency and
+  // /api/health reports real pool state from the start. A failure here is not
+  // fatal — getPool() retries on the next request.
+  getPool()
+    .then(() => console.log("DB pool warmed up"))
+    .catch((err) => console.error("DB pool warm-up failed (will retry on demand):", err.message));
+});
+
+// Graceful shutdown: close the SQL pool so SQL Server drops our sessions right
+// away. Killing the process without this leaves up to pool.max sessions open on
+// the server until they time out, and they accumulate across restarts.
+let shuttingDown = false;
+async function shutdown(signal: string) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`${signal} received, shutting down`);
+  io.close();
+  server.close();
+  await closePool();
+  process.exit(0);
+}
+
+// NOTE (Windows): only SIGINT (Ctrl+C) and SIGBREAK are delivered to Node here.
+// A `taskkill` or Windows service stop terminates the process without running
+// these handlers, so the pool is not closed cleanly in that case — stop the
+// service with Ctrl+C, or with a signal-forwarding wrapper (pm2/nssm), if you
+// want SQL Server to drop the sessions immediately.
+process.on("SIGINT", () => void shutdown("SIGINT"));
+process.on("SIGTERM", () => void shutdown("SIGTERM"));
+process.on("SIGBREAK", () => void shutdown("SIGBREAK"));
+process.on("unhandledRejection", (reason) => {
+  console.error("Unhandled promise rejection:", reason);
 });

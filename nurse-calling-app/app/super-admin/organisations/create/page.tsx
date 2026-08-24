@@ -5,8 +5,9 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { adminPost } from "../../../lib/admin-api";
 import AlertMessages from "../../components/AlertMessages";
+import HidListInput from "../../components/HidListInput";
 import SuperAdminShell from "../../components/SuperAdminShell";
-import { emptyOrgForm } from "../../lib/types";
+import { cleanHids, emptyOrgForm, validateHids } from "../../lib/types";
 
 export default function CreateOrganisationPage() {
   const router = useRouter();
@@ -29,8 +30,9 @@ export default function CreateOrganisationPage() {
       setError("Organisation ID and name are required");
       return;
     }
-    if (formData.hid && !/^\d{10}$/.test(formData.hid)) {
-      setError("Hardware ID (HID) must be exactly 10 digits");
+    const hidError = validateHids(formData.hids);
+    if (hidError) {
+      setError(hidError);
       return;
     }
 
@@ -42,7 +44,7 @@ export default function CreateOrganisationPage() {
         address: formData.address.trim() || null,
         phoneNo: formData.phoneNo.trim() || null,
         contactPerson: formData.contactPerson.trim() || null,
-        hid: formData.hid.trim() || null,
+        hids: cleanHids(formData.hids),
       };
       const result = await adminPost("/api/admin/organisations", payload);
       if (!result.ok) {
@@ -120,15 +122,11 @@ export default function CreateOrganisationPage() {
                 placeholder="Full address"
               />
             </div>
-            <div>
-              <Label htmlFor="hid">Hardware ID (HID)</Label>
-              <TextInput
-                id="hid"
-                name="hid"
-                value={formData.hid}
-                onChange={handleInputChange}
-                placeholder="10-digit device ID"
-                maxLength={10}
+            <div className="sm:col-span-2">
+              <HidListInput
+                hids={formData.hids}
+                onChange={(hids) => setFormData((prev) => ({ ...prev, hids }))}
+                disabled={isSubmitting}
               />
             </div>
             <div className="flex items-end gap-2 sm:col-span-2">

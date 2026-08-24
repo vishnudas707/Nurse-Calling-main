@@ -5,8 +5,9 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { adminDelete, adminGet, adminPut } from "../../lib/admin-api";
 import AlertMessages from "../components/AlertMessages";
+import HidListInput from "../components/HidListInput";
 import SuperAdminShell from "../components/SuperAdminShell";
-import { emptyOrgForm, Organisation } from "../lib/types";
+import { cleanHids, emptyOrgForm, hidRows, Organisation, orgHids, validateHids } from "../lib/types";
 
 export default function OrganisationsPage() {
   const [organisations, setOrganisations] = useState<Organisation[]>([]);
@@ -64,7 +65,7 @@ export default function OrganisationsPage() {
       address: org.address || "",
       phoneNo: org.phoneNo || "",
       contactPerson: org.contactPerson || "",
-      hid: org.hid || "",
+      hids: hidRows(org),
     });
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -78,8 +79,9 @@ export default function OrganisationsPage() {
       setError("Organisation name is required");
       return;
     }
-    if (formData.hid && !/^\d{10}$/.test(formData.hid)) {
-      setError("Hardware ID (HID) must be exactly 10 digits");
+    const hidError = validateHids(formData.hids);
+    if (hidError) {
+      setError(hidError);
       return;
     }
 
@@ -90,7 +92,7 @@ export default function OrganisationsPage() {
         address: formData.address.trim() || null,
         phoneNo: formData.phoneNo.trim() || null,
         contactPerson: formData.contactPerson.trim() || null,
-        hid: formData.hid.trim() || null,
+        hids: cleanHids(formData.hids),
       };
       const result = await adminPut(
         `/api/admin/organisations/${encodeURIComponent(editingOrgId)}`,
@@ -194,14 +196,11 @@ export default function OrganisationsPage() {
                   onChange={handleInputChange}
                 />
               </div>
-              <div>
-                <Label htmlFor="hid">Hardware ID (HID)</Label>
-                <TextInput
-                  id="hid"
-                  name="hid"
-                  value={formData.hid}
-                  onChange={handleInputChange}
-                  maxLength={10}
+              <div className="sm:col-span-2">
+                <HidListInput
+                  hids={formData.hids}
+                  onChange={(hids) => setFormData((prev) => ({ ...prev, hids }))}
+                  disabled={isSubmitting}
                 />
               </div>
               <div className="flex items-end gap-2">
@@ -236,7 +235,7 @@ export default function OrganisationsPage() {
                     <th className="px-4 py-2 text-left text-xs font-medium uppercase text-gray-500 dark:text-gray-300">Contact</th>
                     <th className="px-4 py-2 text-left text-xs font-medium uppercase text-gray-500 dark:text-gray-300">Phone</th>
                     <th className="px-4 py-2 text-left text-xs font-medium uppercase text-gray-500 dark:text-gray-300">Address</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium uppercase text-gray-500 dark:text-gray-300">HID</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium uppercase text-gray-500 dark:text-gray-300">HIDs</th>
                     <th className="px-4 py-2 text-left text-xs font-medium uppercase text-gray-500 dark:text-gray-300">Actions</th>
                   </tr>
                 </thead>
@@ -248,7 +247,22 @@ export default function OrganisationsPage() {
                       <td className="whitespace-nowrap px-4 py-2">{org.contactPerson || "—"}</td>
                       <td className="whitespace-nowrap px-4 py-2">{org.phoneNo || "—"}</td>
                       <td className="px-4 py-2">{org.address || "—"}</td>
-                      <td className="whitespace-nowrap px-4 py-2 font-mono text-sm">{org.hid || "—"}</td>
+                      <td className="px-4 py-2">
+                        {orgHids(org).length === 0 ? (
+                          "—"
+                        ) : (
+                          <div className="flex flex-wrap gap-1">
+                            {orgHids(org).map((hid) => (
+                              <span
+                                key={hid}
+                                className="rounded bg-gray-100 px-2 py-0.5 font-mono text-xs text-gray-800 dark:bg-gray-700 dark:text-gray-100"
+                              >
+                                {hid}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </td>
                       <td className="whitespace-nowrap px-4 py-2">
                         <div className="flex gap-2">
                           <button
