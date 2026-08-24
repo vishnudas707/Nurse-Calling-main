@@ -194,6 +194,34 @@ async function hasCallRepeatTable(pool: any): Promise<boolean> {
 // for the statements to run by hand in that case.
 const ORGANISATION_HID_TABLE = "OrganisationHid";
 let organisationHidTableCache: boolean | null = null;
+let organisationHidListColumnCache: boolean | null = null;
+
+// Comma-joined copy of the organisation's whole HID list, repeated on each of
+// its rows, for readers that want every HID in one column instead of a join.
+// The rows stay the source of truth: this column is derived, and every write
+// goes through setOrganisationHidList() so it cannot drift away from them.
+const ORGANISATION_HID_LIST_COLUMN = "hids";
+
+/**
+ * Rewrites the `hids` column for one organisation from its own rows, so the
+ * derived column always matches them. Safe to call when the column is absent.
+ */
+async function setOrganisationHidList(pool: any, organisationId: string) {
+  if (!(await ensureOrganisationHidListColumn(pool))) return;
+  const request = pool.request();
+  request.input("organisationId", sql.NVarChar(50), organisationId);
+  await request.query(
+    `UPDATE h
+        SET h.[${ORGANISATION_HID_LIST_COLUMN}] = a.hidList
+       FROM [${ORGANISATION_HID_TABLE}] h
+       CROSS APPLY (
+         SELECT STRING_AGG(x.hid, ',') WITHIN GROUP (ORDER BY x.id) AS hidList
+           FROM [${ORGANISATION_HID_TABLE}] x
+          WHERE x.organisationId = h.organisationId
+       ) a
+      WHERE h.organisationId = @organisationId`
+  );
+}
 
 async function ensureOrganisationHidTable(pool: any): Promise<boolean> {
   if (organisationHidTableCache !== null) return organisationHidTableCache;
@@ -217,6 +245,7 @@ async function ensureOrganisationHidTable(pool: any): Promise<boolean> {
          id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
          organisationId NVARCHAR(50) NOT NULL,
          hid NVARCHAR(20) NOT NULL,
+         ${ORGANISATION_HID_LIST_COLUMN} NVARCHAR(MAX) NULL,
          createdAt DATETIME NOT NULL CONSTRAINT DF_OrganisationHid_createdAt DEFAULT GETDATE()
        );
        CREATE INDEX IX_OrganisationHid_organisationId
@@ -225,11 +254,13 @@ async function ensureOrganisationHidTable(pool: any): Promise<boolean> {
     // Carry the existing single HIDs over so nothing disappears from the admin
     // page the first time this runs.
     await pool.request().query(
-      `INSERT INTO [dbo].[${ORGANISATION_HID_TABLE}] (organisationId, hid)
-       SELECT id, CONVERT(NVARCHAR(20), hid) FROM [${ORGANISATION_TABLE}] WHERE hid IS NOT NULL`
+      `INSERT INTO [dbo].[${ORGANISATION_HID_TABLE}] (organisationId, hid, ${ORGANISATION_HID_LIST_COLUMN})
+       SELECT id, CONVERT(NVARCHAR(20), hid), CONVERT(NVARCHAR(20), hid)
+         FROM [${ORGANISATION_TABLE}] WHERE hid IS NOT NULL`
     );
     console.log("[OrganisationHid] Table created and backfilled");
     organisationHidTableCache = true;
+    organisationHidListColumnCache = true;
     return true;
   } catch (err) {
     console.error(
@@ -237,6 +268,63 @@ async function ensureOrganisationHidTable(pool: any): Promise<boolean> {
       err
     );
     organisationHidTableCache = false;
+    return false;
+  }
+}
+
+/**
+ * Adds the derived `hids` column to an existing table, backfilling it from the
+ * rows. Like the table itself this needs DDL rights: without them we log once
+ * and every caller simply leaves the column alone.
+ */
+async function ensureOrganisationHidListColumn(pool: any): Promise<boolean> {
+  if (organisationHidListColumnCache !== null) return organisationHidListColumnCache;
+  if (!(await ensureOrganisationHidTable(pool))) {
+    organisationHidListColumnCache = false;
+    return false;
+  }
+  try {
+    const existing = await pool
+      .request()
+      .query(
+        `SELECT COL_LENGTH(N'[dbo].[${ORGANISATION_HID_TABLE}]', N'${ORGANISATION_HID_LIST_COLUMN}') AS colLen`
+      );
+    if (existing?.recordset?.[0]?.colLen != null) {
+      organisationHidListColumnCache = true;
+      return true;
+    }
+  } catch (err) {
+    console.error("[OrganisationHid] hids column check failed:", err);
+    organisationHidListColumnCache = false;
+    return false;
+  }
+
+  try {
+    await pool.request().query(
+      `ALTER TABLE [dbo].[${ORGANISATION_HID_TABLE}]
+         ADD ${ORGANISATION_HID_LIST_COLUMN} NVARCHAR(MAX) NULL`
+    );
+    // Mark it usable before backfilling: the backfill goes through the same
+    // UPDATE the write path uses, which checks this flag.
+    organisationHidListColumnCache = true;
+    await pool.request().query(
+      `UPDATE h
+          SET h.[${ORGANISATION_HID_LIST_COLUMN}] = a.hidList
+         FROM [${ORGANISATION_HID_TABLE}] h
+         CROSS APPLY (
+           SELECT STRING_AGG(x.hid, ',') WITHIN GROUP (ORDER BY x.id) AS hidList
+             FROM [${ORGANISATION_HID_TABLE}] x
+            WHERE x.organisationId = h.organisationId
+         ) a`
+    );
+    console.log("[OrganisationHid] hids column added and backfilled");
+    return true;
+  } catch (err) {
+    console.error(
+      "[OrganisationHid] Could not add the hids column, leaving it unmanaged:",
+      err
+    );
+    organisationHidListColumnCache = false;
     return false;
   }
 }
@@ -344,6 +432,8 @@ async function saveOrganisationHids(pool: any, organisationId: string, hids: str
       `INSERT INTO [${ORGANISATION_HID_TABLE}] (organisationId, hid) VALUES (@organisationId, @hid)`
     );
   }
+  // Rebuild the derived list column from the rows we just wrote.
+  await setOrganisationHidList(pool, organisationId);
 }
 
 // Middleware
