@@ -26,6 +26,35 @@ The `.env` file contains the following variables:
 - `PORT`: Server port (default: 5000)
 - `NODE_ENV`: Environment (development/production)
 
+#### Database connection
+
+`DB_SERVER`, `DB_PORT`, `DB_DATABASE`, `DB_USER`, `DB_PASSWORD`, `DB_ENCRYPT`,
+`DB_TRUST_CERT` configure the SQL Server connection itself.
+
+The pool is self-healing and normally needs no tuning. These knobs exist so it
+can be adjusted without a code change:
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `DB_POOL_MAX` | `20` | Max pooled connections (= max sessions on SQL Server) |
+| `DB_POOL_MIN` | `1` | Warm connections kept open while idle |
+| `DB_REQUEST_TIMEOUT` | `60000` | Max ms for one query |
+| `DB_POOL_ACQUIRE_TIMEOUT` | request timeout + 10s | Max ms to wait for a free connection. Keep it **≥** `DB_REQUEST_TIMEOUT`, or one slow query makes every other caller fail |
+| `DB_HEARTBEAT_INTERVAL` | `60000` | How often `SELECT 1` proves the link is alive. Also keeps the NAT/firewall mapping to the DB host warm |
+| `DB_HEARTBEAT_TIMEOUT` | `15000` | How long a probe may hang before it counts as failed |
+| `DB_HEARTBEAT_MAX_FAILURES` | `3` | Consecutive failed probes before the pool is recycled |
+| `DB_HEARTBEAT_MAX_SATURATED` | `10` | Consecutive probes blocked purely by a full pool before it is recycled |
+
+`GET /api/health` reports live pool counters (`size`, `borrowed`, `pending`,
+`heartbeatFailures`, `lastPoolError`) — check it first when the service stops
+reaching the database.
+
+### Database indexes
+
+Run `migrations/performance-indexes.sql` once against the database. Without it,
+every device button press scans the whole `CallStatus` table, so the service
+gets progressively slower as call history accumulates.
+
 ### Running the Server
 
 **Development mode** (with hot reload):
