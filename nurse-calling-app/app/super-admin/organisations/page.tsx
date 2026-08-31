@@ -152,7 +152,7 @@ export default function OrganisationsPage() {
         {editingOrgId && (
           <Card className="dark:bg-gray-800">
             <h2 className="mb-4 text-lg font-semibold text-gray-900 dark:text-gray-100">
-              Edit Organisation — {editingOrgId}
+              Edit Organisation &mdash; {editingOrgId}
             </h2>
             <form onSubmit={handleUpdate} className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
@@ -205,7 +205,7 @@ export default function OrganisationsPage() {
               </div>
               <div className="flex items-end gap-2">
                 <Button type="submit" color="blue" disabled={isSubmitting}>
-                  {isSubmitting ? "Saving…" : "Update Organisation"}
+                  {isSubmitting ? "Saving..." : "Update Organisation"}
                 </Button>
                 <Button type="button" color="gray" onClick={resetForm} disabled={isSubmitting}>
                   Cancel
@@ -244,12 +244,12 @@ export default function OrganisationsPage() {
                     <tr key={org.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
                       <td className="whitespace-nowrap px-4 py-2 font-mono text-sm">{org.id}</td>
                       <td className="whitespace-nowrap px-4 py-2 font-medium">{org.name}</td>
-                      <td className="whitespace-nowrap px-4 py-2">{org.contactPerson || "—"}</td>
-                      <td className="whitespace-nowrap px-4 py-2">{org.phoneNo || "—"}</td>
-                      <td className="px-4 py-2">{org.address || "—"}</td>
+                      <td className="whitespace-nowrap px-4 py-2">{org.contactPerson || "\u2014"}</td>
+                      <td className="whitespace-nowrap px-4 py-2">{org.phoneNo || "\u2014"}</td>
+                      <td className="px-4 py-2">{org.address || "\u2014"}</td>
                       <td className="px-4 py-2">
                         {orgHids(org).length === 0 ? (
-                          "—"
+                          "\u2014"
                         ) : (
                           <div className="flex flex-wrap gap-1">
                             {orgHids(org).map((hid) => (

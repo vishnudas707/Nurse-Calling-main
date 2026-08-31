@@ -93,7 +93,7 @@ export default function DeviceEmulatorPage() {
           Device Emulator
         </h1>
         <p className="text-sm text-gray-600 dark:text-gray-400 mb-6 text-center">
-          URL format: r{"{roomNo}"}=status — room keys are 2-digit zero-padded (e.g. r01, r02, r22)
+          URL format: r{"{roomNo}"}=status &mdash; room keys are 2-digit zero-padded (e.g. r01, r02, r22)
         </p>
 
         <div className="space-y-4">
@@ -156,7 +156,7 @@ export default function DeviceEmulatorPage() {
                     onClick={() => removeRoom(row.id)}
                     aria-label="Remove room"
                   >
-                    ✕
+                    &times;
                   </button>
                 </div>
               ))}
@@ -177,7 +177,7 @@ export default function DeviceEmulatorPage() {
           onClick={handleSend}
           disabled={loading}
         >
-          {loading ? "Sending…" : "Send to API"}
+          {loading ? "Sending..." : "Send to API"}
         </button>
 
         {result && (

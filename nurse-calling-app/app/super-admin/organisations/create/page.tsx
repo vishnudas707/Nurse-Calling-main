@@ -131,7 +131,7 @@ export default function CreateOrganisationPage() {
             </div>
             <div className="flex items-end gap-2 sm:col-span-2">
               <Button type="submit" color="blue" disabled={isSubmitting}>
-                {isSubmitting ? "Creating…" : "Create Organisation"}
+                {isSubmitting ? "Creating..." : "Create Organisation"}
               </Button>
               <Button
                 type="button"

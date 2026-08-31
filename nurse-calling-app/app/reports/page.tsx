@@ -169,7 +169,7 @@ export default function ReportsPage() {
     const { default: jsPDF } = await import("jspdf");
     const { default: autoTable } = await import("jspdf-autotable");
     const doc = new jsPDF();
-    doc.text(`Call History Report — ${describeScope(scope)}`, 14, 16);
+    doc.text(`Call History Report \u2014 ${describeScope(scope)}`, 14, 16);
     autoTable(doc, {
       startY: 22,
       head: [["Room", "Department", "HID", "Floor", "Call Type", "Status", "Muted", "Created", "Muted At", "Reset At", "Repeat Count", "Last Repeat At", "Repeat Duration (min)"]],
@@ -263,10 +263,10 @@ export default function ReportsPage() {
                   <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
                     {totalCount === 0
                       ? "No records"
-                      : `Showing ${rangeStart}–${rangeEnd} of ${totalCount}`}
+                      : `Showing ${rangeStart}\u2013${rangeEnd} of ${totalCount}`}
                     {isRefreshing && (
                       <span className="ml-2 inline-flex items-center gap-1 text-blue-600 dark:text-blue-400">
-                        <Spinner size="sm" /> Updating…
+                        <Spinner size="sm" /> Updating...
                       </span>
                     )}
                   </p>
@@ -325,7 +325,7 @@ export default function ReportsPage() {
                         <td className="px-4 py-2 whitespace-nowrap">
                           <span className={`px-2 py-1 rounded text-xs font-semibold ${getDepartmentTypeName(Number(call.departmentType)) === 'Intensive Care' ? 'bg-red-200 text-red-800' : getDepartmentTypeName(Number(call.departmentType)) === 'General Ward' ? 'bg-blue-200 text-blue-800' : getDepartmentTypeName(Number(call.departmentType)) === 'Emergency' ? 'bg-yellow-200 text-yellow-800' : getDepartmentTypeName(Number(call.departmentType)) === 'Surgery' ? 'bg-green-200 text-green-800' : 'bg-gray-200 text-gray-800'}`}>{getDepartmentTypeName(Number(call.departmentType))}</span>
                         </td>
-                        <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-600 dark:text-gray-400">{call.hid || '—'}</td>
+                        <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-600 dark:text-gray-400">{call.hid || '\u2014'}</td>
                         <td className="px-4 py-2 whitespace-nowrap">{call.floor || ''}</td>
                         <td className="px-4 py-2 whitespace-nowrap">
                           {(() => {
@@ -361,7 +361,7 @@ export default function ReportsPage() {
                   <p className="text-sm text-gray-600 dark:text-gray-400">
                     {totalCount === 0
                       ? "No records"
-                      : `Showing ${rangeStart}–${rangeEnd} of ${totalCount}`}
+                      : `Showing ${rangeStart}\u2013${rangeEnd} of ${totalCount}`}
                   </p>
                   <div className="flex flex-wrap items-center gap-3">
                     <div className="flex items-center gap-2">

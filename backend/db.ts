@@ -2,7 +2,7 @@ import dotenv from 'dotenv';
 import sql from 'mssql';
 
 // Load .env here, not only in server.ts. Imports are hoisted, so this module's
-// body runs BEFORE server.ts calls dotenv.config() — without this line every
+// body runs BEFORE server.ts calls dotenv.config() - without this line every
 // DB_* variable below silently falls back to its hardcoded default.
 dotenv.config();
 
@@ -82,7 +82,7 @@ function discard(pool: sql.ConnectionPool, reason: string) {
 
 /**
  * Proves the pool can still round-trip a query. A dead TCP socket does not
- * always surface as an error — it can simply never answer — so the probe is
+ * always surface as an error - it can simply never answer - so the probe is
  * raced against its own timeout rather than trusted to reject on its own.
  */
 async function heartbeat() {
@@ -115,7 +115,7 @@ async function heartbeat() {
     if (saturated) {
       heartbeatSaturated += 1;
       console.warn(
-        `DB heartbeat could not get a connection — pool saturated ` +
+        `DB heartbeat could not get a connection - pool saturated ` +
           `(${pool.borrowed}/${config.pool?.max} busy, ${pool.pending} waiting, ` +
           `${heartbeatSaturated}/${HEARTBEAT_MAX_SATURATED}): ${message}`
       );
@@ -168,7 +168,7 @@ async function createPool(): Promise<sql.ConnectionPool> {
   // mssql emits 'error' here for EVERY failed acquire() as well as for real
   // connection faults, so an acquireTimeoutMillis expiry under load lands here
   // too. Closing the pool on those would kill every in-flight query and turn
-  // one slow query into a cascade, so this only records the error — the
+  // one slow query into a cascade, so this only records the error - the
   // heartbeat decides when a pool is genuinely dead. The handler still has to
   // exist: an emitted 'error' with no listener is an unhandled event and takes
   // the process down.
@@ -241,7 +241,7 @@ export function getPoolStats() {
   const pool = currentPool;
   if (!pool) return { connected: false, heartbeatFailures, heartbeatSaturated, lastPoolError };
   // size/available/borrowed/pending read through to the inner tarn pool, which
-  // close() sets to null — so only touch them while the pool is connected.
+  // close() sets to null - so only touch them while the pool is connected.
   if (!pool.connected) return { connected: false, healthy: pool.healthy, heartbeatFailures, heartbeatSaturated, lastPoolError };
   return {
     connected: pool.connected,

@@ -143,7 +143,7 @@ export default function UsersPage() {
         {editingUserId && (
           <Card className="dark:bg-gray-800">
             <h2 className="mb-4 text-lg font-semibold text-gray-900 dark:text-gray-100">
-              Edit User — {editingUserId}
+              Edit User &mdash; {editingUserId}
             </h2>
             <form onSubmit={handleUpdate} className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
@@ -221,7 +221,7 @@ export default function UsersPage() {
               </div>
               <div className="flex items-end gap-2">
                 <Button type="submit" color="blue" disabled={isSubmitting}>
-                  {isSubmitting ? "Saving…" : "Update User"}
+                  {isSubmitting ? "Saving..." : "Update User"}
                 </Button>
                 <Button type="button" color="gray" onClick={resetForm} disabled={isSubmitting}>
                   Cancel
@@ -261,7 +261,7 @@ export default function UsersPage() {
                     <tr key={user.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
                       <td className="whitespace-nowrap px-4 py-2 font-mono text-sm">{user.id}</td>
                       <td className="whitespace-nowrap px-4 py-2 font-medium">{user.name}</td>
-                      <td className="whitespace-nowrap px-4 py-2">{user.email || "—"}</td>
+                      <td className="whitespace-nowrap px-4 py-2">{user.email || "\u2014"}</td>
                       <td className="whitespace-nowrap px-4 py-2">
                         <span
                           className={`rounded px-2 py-1 text-xs font-semibold ${
@@ -275,9 +275,9 @@ export default function UsersPage() {
                           {user.role}
                         </span>
                       </td>
-                      <td className="whitespace-nowrap px-4 py-2">{user.organisationName || "—"}</td>
-                      <td className="whitespace-nowrap px-4 py-2 font-mono text-sm">{user.organisationId || "—"}</td>
-                      <td className="px-4 py-2">{user.address || "—"}</td>
+                      <td className="whitespace-nowrap px-4 py-2">{user.organisationName || "\u2014"}</td>
+                      <td className="whitespace-nowrap px-4 py-2 font-mono text-sm">{user.organisationId || "\u2014"}</td>
+                      <td className="px-4 py-2">{user.address || "\u2014"}</td>
                       <td className="whitespace-nowrap px-4 py-2">
                         <div className="flex gap-2">
                           <button

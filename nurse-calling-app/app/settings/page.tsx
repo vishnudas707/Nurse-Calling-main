@@ -593,10 +593,10 @@ export default function SettingsPage() {
                                 {room.roomName}
                               </td>
                               <td className="px-6 py-4 text-gray-600 dark:text-gray-400">
-                                {room.roomNo_deviceNo || "—"}
+                                {room.roomNo_deviceNo || "\u2014"}
                               </td>
                               <td className="px-6 py-4 text-gray-600 dark:text-gray-400">
-                                {room.hid || "—"}
+                                {room.hid || "\u2014"}
                               </td>
                               <td className="px-6 py-4 text-gray-600 dark:text-gray-400">
                                 {getRoomTypeName(Number(room.roomType))}
@@ -605,7 +605,7 @@ export default function SettingsPage() {
                                 {getDepartmentTypeName(Number(room.departmentType))}
                               </td>
                               <td className="px-6 py-4 text-gray-600 dark:text-gray-400">
-                                {room.floor || "—"}
+                                {room.floor || "\u2014"}
                               </td>
                               <td className="px-6 py-4">
                                 <button

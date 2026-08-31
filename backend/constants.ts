@@ -59,7 +59,7 @@ export const withCallStatusFields = <T extends { status: number }>(call: T) => {
   return { ...call, statusLabel: label, color };
 };
 
-/** Call type stored in CallStatus.callType (1–5; 5 = miscellaneous, reports only) */
+/** Call type stored in CallStatus.callType (1-5; 5 = miscellaneous, reports only) */
 export const CALL_TYPE_MAP: Record<number, string> = {
   1: "Normal",
   2: "Emergency",

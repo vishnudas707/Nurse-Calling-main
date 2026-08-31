@@ -230,7 +230,7 @@ export default function RegisterPage() {
                   value={formData.password}
                   onChange={handleChange}
                   className="auth-input"
-                  placeholder="••••••••"
+                  placeholder={"\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"}
                   required
                 />
                 <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">
@@ -252,7 +252,7 @@ export default function RegisterPage() {
                   value={formData.confirmPassword}
                   onChange={handleChange}
                   className="auth-input"
-                  placeholder="••••••••"
+                  placeholder={"\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"}
                   required
                 />
               </div>

@@ -613,7 +613,7 @@ app.post("/api/auth/login", async (req: Request, res: Response) => {
   }
 });
 
-// Super admin — organisations & users
+// Super admin - organisations & users
 app.get("/api/admin/organisations", requireSuperAdmin, async (_req: Request, res: Response) => {
   try {
     const pool = await getPool();
@@ -911,7 +911,7 @@ app.delete("/api/admin/users/:id", requireSuperAdmin, async (req: AuthRequest, r
   }
 });
 
-// Super admin — activity log (all organisations)
+// Super admin - activity log (all organisations)
 app.get("/api/admin/logs", requireSuperAdmin, async (req: Request, res: Response) => {
   try {
     const { organisationId, action, startDate, endDate, search, page = 1, pageSize = 50 } = req.query;
@@ -1007,7 +1007,7 @@ const ROOM_TABLE = 'Room';
 // is what a device call is routed by: organisation + HID + device number. Device
 // numbers (r01, r02, ...) restart on every device, so the HID is the only thing
 // that makes "r01" unambiguous once an organisation runs more than one device.
-// Floor plays no part in the lookup — it is descriptive only.
+// Floor plays no part in the lookup - it is descriptive only.
 //
 // The column is added on demand: as with CallRepeat and OrganisationHid the
 // service user may have no DDL rights in production, so every caller falls back
@@ -1061,7 +1061,7 @@ function normaliseRoomHid(value: unknown):
 }
 
 /**
- * Device numbers are scoped to a device, so every HID may reuse the same set —
+ * Device numbers are scoped to a device, so every HID may reuse the same set -
  * r01 on 2408202601 and r01 on 2408202602 are two different rooms. What must
  * stay unique is the pair the call lookup resolves on: (organisation, hid,
  * device number). A second room on the same HID with the same device number
@@ -1931,7 +1931,7 @@ async function processCallStatusForRoom(
     return {
       httpStatus: 200,
       result: "SUCCESS",
-      message: `Room ${dnum}: repeated call — announcement broadcast (call record unchanged)`,
+      message: `Room ${dnum}: repeated call - announcement broadcast (call record unchanged)`,
     };
   }
   if (activeCallResult.recordset.length === 0 && isReset) {
@@ -1998,7 +1998,7 @@ async function processCallStatusForRoom(
     action: "call.created",
     entityType: "call",
     entityId: callId,
-    message: `Device call: ${roomName} — ${getCallTypeName(statusNumber)}`,
+    message: `Device call: ${roomName} - ${getCallTypeName(statusNumber)}`,
     details: { roomId, dnum, hid, floor: roomFloor, status: statusNumber },
   });
   return { httpStatus: 200, result: "SUCCESS", message: `Room ${dnum}: new call inserted (status ${statusNumber})` };
@@ -2012,14 +2012,14 @@ app.get("/api/callstatus", (req: Request, res: Response) => {
     method: "GET",
     example: `${base}/api/callstatus/insert?orgId=00001&hid=1234567890&r01=1&r02=2&r22=3`,
     queryParams: {
-      orgId: "required — organisation id",
-      hid: "required — 10-digit hardware id; identifies the room together with orgId and the device number",
-      "r{roomNo}": "required (one or more) — 2-digit zero-padded room device number with status value (e.g. r01, r02, r22)",
+      orgId: "required - organisation id",
+      hid: "required - 10-digit hardware id; identifies the room together with orgId and the device number",
+      "r{roomNo}": "required (one or more) - 2-digit zero-padded room device number with status value (e.g. r01, r02, r22)",
     },
     // The device does not send a floor. The server reads it off the matched
     // room and returns it on the call, so a room can be moved between floors in
     // the settings page without reprogramming the hardware.
-    floorNote: "not a query parameter — resolved from the room and returned on the call",
+    floorNote: "not a query parameter - resolved from the room and returned on the call",
     statusCodes: CALL_STATUS_MAP,
   });
 });
@@ -2126,7 +2126,7 @@ server.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`);
   // Warm the pool so the first device call is not paying connect latency and
   // /api/health reports real pool state from the start. A failure here is not
-  // fatal — getPool() retries on the next request.
+  // fatal - getPool() retries on the next request.
   getPool()
     .then(() => console.log("DB pool warmed up"))
     .catch((err) => console.error("DB pool warm-up failed (will retry on demand):", err.message));
@@ -2148,7 +2148,7 @@ async function shutdown(signal: string) {
 
 // NOTE (Windows): only SIGINT (Ctrl+C) and SIGBREAK are delivered to Node here.
 // A `taskkill` or Windows service stop terminates the process without running
-// these handlers, so the pool is not closed cleanly in that case — stop the
+// these handlers, so the pool is not closed cleanly in that case - stop the
 // service with Ctrl+C, or with a signal-forwarding wrapper (pm2/nssm), if you
 // want SQL Server to drop the sessions immediately.
 process.on("SIGINT", () => void shutdown("SIGINT"));

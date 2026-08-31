@@ -133,7 +133,7 @@ export default function LoginPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="auth-input"
-              placeholder="••••••••"
+              placeholder={"\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"}
               autoComplete="current-password"
               required
             />

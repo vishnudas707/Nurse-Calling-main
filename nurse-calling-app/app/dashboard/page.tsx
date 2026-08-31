@@ -426,7 +426,7 @@ import { io, Socket } from "socket.io-client";
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-xl font-bold tracking-tight text-gray-900 dark:text-white sm:text-2xl">
-              {isSplit ? `${label} — ${describeScope(scope)}` : "Active Calls"}
+              {isSplit ? `${label} \u2014 ${describeScope(scope)}` : "Active Calls"}
               {!isLoading && !error && (
                 <span className="ml-2 text-base font-medium text-gray-500 dark:text-gray-400">
                   ({calls.length} active)

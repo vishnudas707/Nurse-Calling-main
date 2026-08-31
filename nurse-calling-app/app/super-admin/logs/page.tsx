@@ -112,7 +112,7 @@ export default function SuperAdminLogsPage() {
   return (
     <SuperAdminShell
       title="Activity Log"
-      description="All organisations — super admin only"
+      description={"All organisations \u2014 super admin only"}
     >
       <div className="space-y-6">
         <AlertMessages error={error} />
@@ -176,10 +176,10 @@ export default function SuperAdminLogsPage() {
                     {logs.map((log) => (
                       <tr key={log.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
                         <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">
-                          {log.createdAt ? new Date(log.createdAt).toLocaleString() : "—"}
+                          {log.createdAt ? new Date(log.createdAt).toLocaleString() : "\u2014"}
                         </td>
                         <td className="px-4 py-2 whitespace-nowrap text-sm">
-                          <div className="font-medium text-gray-900 dark:text-gray-100">{log.organisationName || "—"}</div>
+                          <div className="font-medium text-gray-900 dark:text-gray-100">{log.organisationName || "\u2014"}</div>
                           <div className="text-xs text-gray-500 font-mono">{log.organisationId || ""}</div>
                         </td>
                         <td className="px-4 py-2 whitespace-nowrap">
@@ -189,7 +189,7 @@ export default function SuperAdminLogsPage() {
                         </td>
                         <td className="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 max-w-md">{log.message}</td>
                         <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-600 dark:text-gray-400">
-                          {log.actorName || log.actorId || "—"}
+                          {log.actorName || log.actorId || "\u2014"}
                         </td>
                       </tr>
                     ))}
