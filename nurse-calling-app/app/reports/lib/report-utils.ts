@@ -1,4 +1,6 @@
 import { getOrganisationId } from "../../lib/auth";
+import { scopeQuery } from "../../lib/scope";
+import type { Scope } from "../../lib/scope";
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://20.163.9.187:5001";
 
@@ -45,29 +47,11 @@ export async function fetchRoomsCached(signal?: AbortSignal): Promise<CallRecord
 }
 
 export function buildCallsHistoryParams(
-  filters: {
-    startDate?: string;
-    endDate?: string;
-    search?: string;
-    statusFilter?: string;
-    roomFilter?: string;
-    mutedFilter?: string;
-  },
+  filters: ReportFilterParams,
   page: number,
   pageSize: number
 ) {
-  const params: string[] = [];
-  const normalizedStartDate = normalizeDateFilter(filters.startDate, "start");
-  const normalizedEndDate = normalizeDateFilter(filters.endDate, "end");
-  if (normalizedStartDate) params.push(`startDate=${encodeURIComponent(normalizedStartDate)}`);
-  if (normalizedEndDate) params.push(`endDate=${encodeURIComponent(normalizedEndDate)}`);
-  if (filters.search) params.push(`search=${encodeURIComponent(filters.search)}`);
-  if (filters.statusFilter) params.push(`status=${encodeURIComponent(filters.statusFilter)}`);
-  if (filters.roomFilter) params.push(`room=${encodeURIComponent(filters.roomFilter)}`);
-  if (filters.mutedFilter) params.push(`muted=${encodeURIComponent(filters.mutedFilter)}`);
-  params.push(`page=${page}`);
-  params.push(`pageSize=${pageSize}`);
-  return params.join("&");
+  return buildHistoryQueryParams(filters, page, pageSize);
 }
 
 /** Local calendar day bounds (12:00 AM - 11:59:59 PM) as ISO strings for the API. */
@@ -160,6 +144,8 @@ export type ReportFilterParams = {
   statusFilter?: string;
   roomFilter?: string;
   mutedFilter?: string;
+  /** Device / floor scope, narrowed in SQL - see buildHistoryQueryParams. */
+  scope?: Scope;
 };
 
 export function buildHistoryQueryParams(filters: ReportFilterParams, page = 1, pageSize = 100000) {
@@ -172,6 +158,12 @@ export function buildHistoryQueryParams(filters: ReportFilterParams, page = 1, p
   if (filters.statusFilter) params.push(`status=${encodeURIComponent(filters.statusFilter)}`);
   if (filters.roomFilter) params.push(`room=${encodeURIComponent(filters.roomFilter)}`);
   if (filters.mutedFilter) params.push(`muted=${encodeURIComponent(filters.mutedFilter)}`);
+  // The server narrows by scope so paging and totals stay honest; filtering a
+  // fetched page here would report the wrong count and drop rows.
+  if (filters.scope) {
+    const scoped = scopeQuery(filters.scope);
+    if (scoped) params.push(scoped.slice(1));
+  }
   params.push(`page=${page}`);
   params.push(`pageSize=${pageSize}`);
   return params.join("&");

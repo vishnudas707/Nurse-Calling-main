@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useScope } from "../../lib/scope";
 import { buildHistoryQueryParams, callsHistoryUrl, fetchRoomsCached, sortCallsForReportTable, type CallRecord, type ReportFilterParams } from "../lib/report-utils";
 
 export function useReportCalls(filters: ReportFilterParams) {
@@ -8,6 +9,10 @@ export function useReportCalls(filters: ReportFilterParams) {
   const [rooms, setRooms] = useState<CallRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
+
+  // Every summary report inherits the nav bar's device/floor scope, so the
+  // three of them and the main report always cover the same set of rooms.
+  const [scope] = useScope("primary");
 
   const { startDate, endDate, search, statusFilter, roomFilter, mutedFilter } = filters;
 
@@ -27,7 +32,7 @@ export function useReportCalls(filters: ReportFilterParams) {
       setIsLoading(true);
       setError("");
       try {
-        const query = buildHistoryQueryParams(filters);
+        const query = buildHistoryQueryParams({ ...filters, scope });
         const callsResp = await fetch(callsHistoryUrl(query), { signal: ac.signal });
         const callsData = await callsResp.json();
         if (callsResp.ok && callsData.success) {
@@ -48,7 +53,7 @@ export function useReportCalls(filters: ReportFilterParams) {
     };
     fetchData();
     return () => ac.abort();
-  }, [startDate, endDate, search, statusFilter, roomFilter, mutedFilter]);
+  }, [startDate, endDate, search, statusFilter, roomFilter, mutedFilter, scope]);
 
-  return { allCalls, rooms, isLoading, error };
+  return { allCalls, rooms, isLoading, error, scope };
 }

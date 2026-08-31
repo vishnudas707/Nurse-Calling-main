@@ -16,7 +16,7 @@ export default function CallsPerRoomPage() {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
 
-  const { allCalls, rooms, isLoading, error } = useReportCalls({
+  const { allCalls, rooms, isLoading, error, scope } = useReportCalls({
     startDate,
     endDate,
     search,
@@ -47,6 +47,7 @@ export default function CallsPerRoomPage() {
             endDate={endDate}
             setEndDate={setEndDate}
             rooms={rooms}
+            scope={scope}
           />
           <Card className="dark:bg-gray-800">
             <div className="flex flex-wrap items-center justify-between gap-3 mb-4">

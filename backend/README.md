@@ -100,6 +100,13 @@ match always outranks a HID-less room in the lookup.
 - `GET /api/calls/active` - Get all active calls
 - `POST /api/calls` - Create a new call
 - `PUT /api/calls/:id` - Update call status
+- `GET /api/calls/history` - Paged call history for the reports
+
+`/api/calls/active` and `/api/calls/history` both accept an optional `hid` or
+`floor` alongside `organisationId`, and both return `hid` and `floor` on every
+row. This is what lets one login split into per-device views: the dashboard
+watches two scopes at once, and the reports narrow to one. History is filtered
+in SQL rather than in the browser so `totalCount` and paging stay correct.
 
 ### Device call status (hardware integration)
 - `GET /api/callstatus` - API contract, status codes, and example URL
@@ -114,8 +121,10 @@ GET /api/callstatus/insert?orgId=00001&hid=1234567890&r01=1&r02=2&r22=3
 |-------|-------------|
 | `orgId` | Organisation ID |
 | `hid` | 10-digit hardware ID — matched against `[Room].hid` to pick the room |
-| `floor` | Optional and ignored — still accepted so devices already sending it keep working |
 | `r{roomNo}` | 2-digit zero-padded room device number → status (e.g. `r01`, `r02`, `r22`; repeat for multiple rooms) |
+
+There is no `floor` parameter. A stray `floor=` left in an older device's URL is
+ignored rather than rejected, so nothing has to be reprogrammed at once.
 
 | Status | Meaning | Color |
 |--------|---------|-------|
@@ -131,6 +140,13 @@ one, so it never disambiguated anything the HID does not. A room whose `hid`
 matches the reporting device wins; a room with no `hid` set is still matched, so
 sites that never filled the field in keep working. A room belonging to a
 *different* device is never matched.
+
+**Floor:** the device does not report one. Once the room is matched, the server
+reads `[Room].floor` and attaches it to the call — on the `call:new` socket
+payload, on `GET /api/calls/active`, on `GET /api/calls/history` and in the
+activity log. So the floor a call is shown under is whatever the room is set to
+at the moment it comes in: change a room's floor in the settings page and the
+next call reports the new one, with nothing to change on the hardware.
 
 **Insert response:** plain text `SUCCESS` when all rooms succeed, otherwise `FAILURE` (no JSON body).
 

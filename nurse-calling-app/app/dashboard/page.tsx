@@ -3,12 +3,15 @@
 "use client";
 
 import TopNavBar from "../components/navbar";
+import ScopeBar from "../components/scope-bar";
 import { Card } from "flowbite-react";
 import { getOrganisationId } from "../lib/auth";
 import { getCallTypeName, MISCELLANEOUS_CALL_TYPE } from "../lib/constants";
 import { getCallStateLabel, toDayKey, getResolvedStatusClassName, getLocalDayRange } from "../reports/lib/report-utils";
+import { describeScope, matchesScope, scopeQuery, useScope, useScopeOptions } from "../lib/scope";
+import type { Scope } from "../lib/scope";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { io, Socket } from "socket.io-client";
 
   function DashboardPage() {
@@ -22,6 +25,25 @@ import { io, Socket } from "socket.io-client";
     const [organisationId, setOrganisationId] = useState<string | null>(null);
     const [organisationName, setOrganisationName] = useState<string | null>(null);
     const [, forceTimeTick] = useState(0);
+
+    // One organisation, two live views. The top pane's scope is the app-wide
+    // one - Reports and Settings follow it - while the bottom pane is a second
+    // device or floor watched alongside it on the same screen.
+    const [primaryScope, setPrimaryScope] = useScope("primary");
+    const [secondaryScope, setSecondaryScope] = useScope("secondary");
+    const scopeOptions = useScopeOptions();
+    const isSplit = scopeOptions.hids.length > 1 || scopeOptions.floors.length > 1;
+    const didSeedSecondary = useRef(false);
+
+    // With two devices, a bottom pane defaulted to "All" would just repeat the
+    // top one. Seed it with a different device the first time, once.
+    useEffect(() => {
+      if (didSeedSecondary.current || scopeOptions.isLoading) return;
+      didSeedSecondary.current = true;
+      if (secondaryScope.value) return;
+      const other = scopeOptions.hids.find((hid) => hid !== primaryScope.value);
+      if (other) setSecondaryScope({ basis: "hid", value: other });
+    }, [scopeOptions, primaryScope.value, secondaryScope.value, setSecondaryScope]);
 
     const resolveCallFromDashboard = useCallback(async (callId: string) => {
       const orgId = getOrganisationId();
@@ -46,11 +68,13 @@ import { io, Socket } from "socket.io-client";
       void resolveCallFromDashboard(callId);
     }, [resolveCallFromDashboard]);
 
-    const clearAllVisibleCalls = useCallback(() => {
-      for (const call of activeCalls) {
+    // Scoped to the pane it was pressed in, so clearing one device's board
+    // never resolves calls the operator cannot see.
+    const clearAllVisibleCalls = useCallback((calls: any[]) => {
+      for (const call of calls) {
         if (call.id) void resolveCallFromDashboard(call.id);
       }
-    }, [activeCalls, resolveCallFromDashboard]);
+    }, [resolveCallFromDashboard]);
 
     function getCallTypeNum(call: { callType?: number | null; status?: number }) {
       if (call.callType != null) return call.callType;
@@ -140,11 +164,16 @@ import { io, Socket } from "socket.io-client";
       window.speechSynthesis.speak(utterance);
     }
   
-    // Dynamic stats
+    // Active calls are fetched for the whole organisation and split here, so a
+    // single socket and a single poll feed both panes.
+    const topCalls = activeCalls.filter((c) => matchesScope(c, primaryScope));
+    const bottomCalls = activeCalls.filter((c) => matchesScope(c, secondaryScope));
+
+    // Dynamic stats - these summarise the top pane, the app-wide scope.
     const now = new Date();
     const todayStr = toDayKey(now);
-    const totalCalls = activeCalls.length;
-    const pendingCalls = activeCalls.filter(c => !c.muted).length;
+    const totalCalls = topCalls.length;
+    const pendingCalls = topCalls.filter(c => !c.muted).length;
     const resolvedToday = todayHistory.filter((c) => {
       if (!c.dateTimeReset) return false;
       return toDayKey(c.dateTimeReset) === todayStr;
@@ -192,7 +221,68 @@ import { io, Socket } from "socket.io-client";
         ),
       },
     ];
-  
+
+    // History is narrowed on the server: the recent list asks for five rows, so
+    // filtering here instead would leave the panel short whenever the newest
+    // calls belong to another device.
+    const refreshHistoryRef = useRef<() => void>(() => {});
+
+    // The socket handlers below are installed once on mount, so they read the
+    // live scopes through a ref rather than a stale closure.
+    const scopesRef = useRef<Scope[]>([primaryScope, secondaryScope]);
+    scopesRef.current = [primaryScope, secondaryScope];
+    /** True when a call belongs to a device or floor this screen is showing. */
+    const isOnScreen = (call: { hid?: string | null; floor?: number | null }) =>
+      scopesRef.current.some((scope) => matchesScope(call, scope));
+
+    useEffect(() => {
+      const orgId = getOrganisationId();
+      if (!orgId) return;
+      const ac = new AbortController();
+      const orgQuery = `?organisationId=${encodeURIComponent(orgId)}${scopeQuery(primaryScope)}`;
+
+      const fetchTodayHistory = async () => {
+        const { start: todayStart, end: todayEnd } = getLocalDayRange(new Date());
+        try {
+          const resp = await fetch(
+            `${API_BASE}/api/calls/history${orgQuery}&resetStartDate=${encodeURIComponent(todayStart)}&resetEndDate=${encodeURIComponent(todayEnd)}&status=resolved&page=1&pageSize=10000`,
+            { signal: ac.signal }
+          );
+          const data = await resp.json();
+          if (resp.ok && data.success) {
+            setTodayHistory((data.data || []).filter((c: { callType?: number }) => c.callType !== MISCELLANEOUS_CALL_TYPE));
+          }
+        } catch (err) {
+          if ((err as Error)?.name === "AbortError") return;
+          console.error("Error fetching today history", err);
+        }
+      };
+
+      const fetchRecentHistory = async () => {
+        try {
+          const resp = await fetch(`${API_BASE}/api/calls/history${orgQuery}&page=1&pageSize=5`, {
+            signal: ac.signal,
+          });
+          const data = await resp.json();
+          if (resp.ok && data.success) {
+            setRecentHistory((data.data || []).filter((c: { callType?: number }) => c.callType !== MISCELLANEOUS_CALL_TYPE).slice(0, 5));
+          }
+        } catch (err) {
+          if ((err as Error)?.name === "AbortError") return;
+          console.error("Error fetching recent history", err);
+        }
+      };
+
+      const refresh = () => {
+        void fetchRecentHistory();
+        void fetchTodayHistory();
+      };
+      refreshHistoryRef.current = refresh;
+      refresh();
+
+      return () => ac.abort();
+    }, [API_BASE, primaryScope]);
+
     useEffect(() => {
       const tickId = window.setInterval(() => {
         forceTimeTick((x) => x + 1);
@@ -241,43 +331,10 @@ import { io, Socket } from "socket.io-client";
         }
       };
       fetchActiveCalls();
-  
-      const fetchTodayHistory = async () => {
-        const { start: todayStart, end: todayEnd } = getLocalDayRange(new Date());
-        try {
-          const resp = await fetch(
-            `${API_BASE}/api/calls/history${orgQuery}&resetStartDate=${encodeURIComponent(todayStart)}&resetEndDate=${encodeURIComponent(todayEnd)}&status=resolved&page=1&pageSize=10000`
-          );
-          const data = await resp.json();
-          if (resp.ok && data.success) {
-            setTodayHistory((data.data || []).filter((c: { callType?: number }) => c.callType !== MISCELLANEOUS_CALL_TYPE));
-          }
-        } catch (err) {
-          console.error("Error fetching today history", err);
-        }
-      };
 
-      const fetchRecentHistory = async () => {
-        try {
-          const resp = await fetch(
-            `${API_BASE}/api/calls/history${orgQuery}&page=1&pageSize=5`
-          );
-          const data = await resp.json();
-          if (resp.ok && data.success) {
-            setRecentHistory((data.data || []).filter((c: { callType?: number }) => c.callType !== MISCELLANEOUS_CALL_TYPE).slice(0, 5));
-          }
-        } catch (err) {
-          console.error("Error fetching recent history", err);
-        }
-      };
-
-      fetchRecentHistory();
-      fetchTodayHistory();
-  
       const refreshIntervalId = window.setInterval(() => {
         fetchActiveCalls();
-        fetchRecentHistory();
-        fetchTodayHistory();
+        refreshHistoryRef.current();
       }, 5 * 60 * 1000);
   
       // Setup socket.io client
@@ -295,15 +352,19 @@ import { io, Socket } from "socket.io-client";
           if (call?.organisationId && call.organisationId !== orgId) return;
           if (call?.callType === MISCELLANEOUS_CALL_TYPE) return;
           console.log('[SocketIO] Received call:new', call);
+          // Announce only what this screen is actually showing - a station
+          // watching one ward should not be read out another ward's calls. An
+          // unscoped pane still matches everything, so the default is unchanged.
+          const announce = isOnScreen(call);
           setActiveCalls((prev) => {
             // If call already exists, do nothing; else, add new card
             const exists = prev.find((c) => c.id === call.id);
             if (exists) {
-              speakText(`Announcement: Repeated call from ${call.roomName}. Please attend.`);
+              if (announce) speakText(`Announcement: Repeated call from ${call.roomName}. Please attend.`);
               return prev;
             }
             console.log('calling speakText for new call'+call.roomName);
-            speakText(`Announcement: New call from ${call.roomName}. Please attend.`);
+            if (announce) speakText(`Announcement: New call from ${call.roomName}. Please attend.`);
             return [call, ...prev];
           });
         } catch (err) {
@@ -323,8 +384,7 @@ import { io, Socket } from "socket.io-client";
           console.log('[SocketIO] Received call:status', { id, status });
           if (status === 0) {
             setActiveCalls((prev) => prev.filter((c) => c.id !== id));
-            fetchTodayHistory();
-            fetchRecentHistory();
+            refreshHistoryRef.current();
           } else {
             setActiveCalls((prev) => prev.map((c) => c.id === id ? { ...c, status, callType: c.callType ?? status } : c));
           }
@@ -340,121 +400,177 @@ import { io, Socket } from "socket.io-client";
       };
     }, []);
   
+    /**
+     * One live board. The dashboard renders it twice - the top pane on the
+     * app-wide scope, the bottom pane on its own - so one screen can watch two
+     * devices or two floors at once. Both read the same activeCalls state, so
+     * there is still a single fetch and a single socket behind them.
+     */
+    const renderActiveCallsPane = ({
+      label,
+      calls,
+      scope,
+      setScope,
+      showOrganisation,
+      showScopePicker,
+    }: {
+      label: string;
+      calls: any[];
+      scope: Scope;
+      setScope: (next: Scope) => void;
+      showOrganisation: boolean;
+      /** Only the bottom pane picks its own scope; the top follows the nav bar. */
+      showScopePicker: boolean;
+    }) => (
+      <div className="mb-8">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-xl font-bold tracking-tight text-gray-900 dark:text-white sm:text-2xl">
+              {isSplit ? `${label} — ${describeScope(scope)}` : "Active Calls"}
+              {!isLoading && !error && (
+                <span className="ml-2 text-base font-medium text-gray-500 dark:text-gray-400">
+                  ({calls.length} active)
+                </span>
+              )}
+            </h2>
+            {showOrganisation && organisationId && (
+              <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+                Organisation:{" "}
+                <span className="font-medium">
+                  {organisationName || organisationId}
+                </span>
+                {organisationName && (
+                  <span className="text-gray-500 dark:text-gray-500"> ({organisationId})</span>
+                )}
+              </p>
+            )}
+          </div>
+          {!isLoading && !error && calls.length > 0 && (
+            <button
+              type="button"
+              onClick={() => clearAllVisibleCalls(calls)}
+              className="touch-btn border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+            >
+              Clear All
+            </button>
+          )}
+        </div>
+
+        {showScopePicker ? (
+          <ScopeBar
+            scope={scope}
+            onChange={setScope}
+            options={scopeOptions}
+            label={label}
+            hint={`${calls.length} active call${calls.length === 1 ? "" : "s"}`}
+            compact
+          />
+        ) : null}
+
+        {/* Active Calls Grid - 6 per row */}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+          {isLoading ? (
+            <div className="col-span-full rounded-2xl border border-dashed border-gray-300 py-10 text-center text-gray-600 dark:border-gray-600 dark:text-gray-300">Loading active calls...</div>
+          ) : error ? (
+            <div className="col-span-full rounded-2xl border border-red-200 bg-red-50 py-10 text-center text-red-600 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">{error}</div>
+          ) : calls.length === 0 ? (
+            <div className="col-span-full rounded-2xl border border-dashed border-gray-300 py-10 text-center text-gray-600 dark:border-gray-600 dark:text-gray-300">
+              {isSplit ? `No active calls for ${describeScope(scope)}` : "No active calls"}
+            </div>
+          ) : (
+            calls.map((call) => (
+              (() => {
+                const theme = getCallTheme(getCallTypeNum(call), call.muted);
+                return (
+              <div
+                key={call.id || call.roomId}
+                className={`flex flex-col items-center justify-center rounded-2xl p-5 shadow-sm sm:p-6 ${theme.bg}`}
+              >
+                <p className={`text-3xl font-bold sm:text-4xl ${theme.title}`}>
+                  {call.roomName}
+                </p>
+                <p className={`mt-2 text-sm font-medium ${theme.sub}`}>
+                  {theme.label}
+                </p>
+                {/* The device never sends a floor - this is the one the room is
+                    on right now, resolved server-side when the call arrived. */}
+                {call.floor ? (
+                  <p className={`mt-1 text-xs font-medium ${theme.sub}`}>
+                    Floor {call.floor}
+                  </p>
+                ) : null}
+                <p className={`mt-1 text-xs ${theme.meta}`}>
+                  {(() => {
+                    const mins = call?.timestamp
+                      ? Math.floor((Date.now() - new Date(call.timestamp).getTime()) / 60000)
+                      : call?.minutesAgo;
+                    return mins !== undefined && mins !== null
+                      ? `${mins} min${mins === 1 ? "" : "s"} ago`
+                      : "";
+                  })()}
+                </p>
+                {/* Mute status UI and toggle */}
+                {call.muted !== undefined && (
+                  <div className="mt-3 flex w-full flex-col items-center">
+                    <p className={`text-xs font-semibold ${call.muted ? 'text-gray-500' : 'text-green-600'}`}>{call.muted ? 'Muted' : 'Unmuted'}</p>
+                    <button
+                      className={`mt-1.5 min-h-10 w-full max-w-[140px] rounded-xl px-3 py-2 text-sm font-medium border ${call.muted ? 'bg-gray-200 text-gray-700 border-gray-400 dark:bg-gray-700 dark:text-gray-200' : 'bg-green-100 text-green-800 border-green-400 dark:bg-green-900 dark:text-green-200'}`}
+                      onClick={async () => {
+                        try {
+                          const organisationId = getOrganisationId();
+                          if (!organisationId) return;
+                          const payload = { muted: !call.muted, organisationId };
+                          console.log('[MuteButton] Sending PUT', `${API_BASE}/api/calls/${call.id}`, payload);
+                          const resp = await fetch(`${API_BASE}/api/calls/${call.id}`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload),
+                          });
+                          const data = await resp.json();
+                          console.log('[MuteButton] Response', data);
+                          if (resp.ok) {
+                            // Update local state
+                            setActiveCalls((prev) => prev.map((c) => c.id === call.id ? { ...c, muted: !call.muted } : c));
+                          }
+                        } catch (err) {
+                          console.error('[MuteButton] Error', err);
+                        }
+                      }}
+                    >
+                      {call.muted ? 'Unmute' : 'Mute'}
+                    </button>
+                  </div>
+                )}
+                <button
+                  type="button"
+                  className="mt-2 min-h-10 w-full max-w-[140px] rounded-xl border border-amber-500 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900 hover:bg-amber-100 dark:border-amber-600 dark:bg-amber-950 dark:text-amber-200 dark:hover:bg-amber-900"
+                  onClick={() => clearCallFromDashboard(call.id)}
+                  title="Resolve call and record reset time in reports"
+                >
+                  Clear
+                </button>
+              </div>
+                );
+              })()
+            ))
+          )}
+        </div>
+      </div>
+    );
+
     return (
       <div className="page-shell">
         <TopNavBar />
 
       <div className="page-container">
-          {/* Active Calls Section - Moved to Top */}
-          <div className="mb-8">
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h2 className="text-xl font-bold tracking-tight text-gray-900 dark:text-white sm:text-2xl">
-                  Active Calls
-                </h2>
-                {organisationId && (
-                  <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
-                    Organisation:{" "}
-                    <span className="font-medium">
-                      {organisationName || organisationId}
-                    </span>
-                    {organisationName && (
-                      <span className="text-gray-500 dark:text-gray-500"> ({organisationId})</span>
-                    )}
-                  </p>
-                )}
-              </div>
-              {!isLoading && !error && activeCalls.length > 0 && (
-                <button
-                  type="button"
-                  onClick={clearAllVisibleCalls}
-                  className="touch-btn border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
-                >
-                  Clear All
-                </button>
-              )}
-            </div>
-
-            {/* Active Calls Grid - 6 per row */}
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-              {isLoading ? (
-                <div className="col-span-full rounded-2xl border border-dashed border-gray-300 py-10 text-center text-gray-600 dark:border-gray-600 dark:text-gray-300">Loading active calls...</div>
-              ) : error ? (
-                <div className="col-span-full rounded-2xl border border-red-200 bg-red-50 py-10 text-center text-red-600 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">{error}</div>
-              ) : activeCalls.length === 0 ? (
-                <div className="col-span-full rounded-2xl border border-dashed border-gray-300 py-10 text-center text-gray-600 dark:border-gray-600 dark:text-gray-300">No active calls</div>
-              ) : (
-                activeCalls.map((call) => (
-                  (() => {
-                    const theme = getCallTheme(getCallTypeNum(call), call.muted);
-                    return (
-                  <div
-                    key={call.id || call.roomId}
-                    className={`flex flex-col items-center justify-center rounded-2xl p-5 shadow-sm sm:p-6 ${theme.bg}`}
-                  >
-                    <p className={`text-3xl font-bold sm:text-4xl ${theme.title}`}>
-                      {call.roomName}
-                    </p>
-                    <p className={`mt-2 text-sm font-medium ${theme.sub}`}>
-                      {theme.label}
-                    </p>
-                    <p className={`mt-1 text-xs ${theme.meta}`}>
-                      {(() => {
-                        const mins = call?.timestamp
-                          ? Math.floor((Date.now() - new Date(call.timestamp).getTime()) / 60000)
-                          : call?.minutesAgo;
-                        return mins !== undefined && mins !== null
-                          ? `${mins} min${mins === 1 ? "" : "s"} ago`
-                          : "";
-                      })()}
-                    </p>
-                    {/* Mute status UI and toggle */}
-                    {call.muted !== undefined && (
-                      <div className="mt-3 flex w-full flex-col items-center">
-                        <p className={`text-xs font-semibold ${call.muted ? 'text-gray-500' : 'text-green-600'}`}>{call.muted ? 'Muted' : 'Unmuted'}</p>
-                        <button
-                          className={`mt-1.5 min-h-10 w-full max-w-[140px] rounded-xl px-3 py-2 text-sm font-medium border ${call.muted ? 'bg-gray-200 text-gray-700 border-gray-400 dark:bg-gray-700 dark:text-gray-200' : 'bg-green-100 text-green-800 border-green-400 dark:bg-green-900 dark:text-green-200'}`}
-                          onClick={async () => {
-                            try {
-                              const organisationId = getOrganisationId();
-                              if (!organisationId) return;
-                              const payload = { muted: !call.muted, organisationId };
-                              console.log('[MuteButton] Sending PUT', `${API_BASE}/api/calls/${call.id}`, payload);
-                              const resp = await fetch(`${API_BASE}/api/calls/${call.id}`, {
-                                method: 'PUT',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify(payload),
-                              });
-                              const data = await resp.json();
-                              console.log('[MuteButton] Response', data);
-                              if (resp.ok) {
-                                // Update local state
-                                setActiveCalls((prev) => prev.map((c) => c.id === call.id ? { ...c, muted: !call.muted } : c));
-                              }
-                            } catch (err) {
-                              console.error('[MuteButton] Error', err);
-                            }
-                          }}
-                        >
-                          {call.muted ? 'Unmute' : 'Mute'}
-                        </button>
-                      </div>
-                    )}
-                    <button
-                      type="button"
-                      className="mt-2 min-h-10 w-full max-w-[140px] rounded-xl border border-amber-500 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900 hover:bg-amber-100 dark:border-amber-600 dark:bg-amber-950 dark:text-amber-200 dark:hover:bg-amber-900"
-                      onClick={() => clearCallFromDashboard(call.id)}
-                      title="Resolve call and record reset time in reports"
-                    >
-                      Clear
-                    </button>
-                  </div>
-                    );
-                  })()
-                ))
-              )}
-            </div>
-          </div>
+          {renderActiveCallsPane({
+            label: "Top",
+            calls: topCalls,
+            scope: primaryScope,
+            setScope: setPrimaryScope,
+            showOrganisation: true,
+            showScopePicker: false,
+          })}
 
           {/* Stats Grid */}
           <div className="mb-8 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
@@ -505,6 +621,11 @@ import { io, Socket } from "socket.io-client";
                         <div className="min-w-0 flex-1">
                           <p className="font-medium text-gray-900 dark:text-white">
                             Call from {item.roomName}
+                            {item.floor ? (
+                              <span className="ml-2 text-sm font-normal text-gray-500 dark:text-gray-400">
+                                Floor {item.floor}
+                              </span>
+                            ) : null}
                           </p>
                           <p className="text-sm text-gray-600 dark:text-gray-400">
                             {Math.floor((new Date().getTime() - new Date(item.timestamp).getTime()) / (1000 * 60))} minutes ago

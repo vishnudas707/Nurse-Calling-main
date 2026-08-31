@@ -7,6 +7,7 @@ import { Card } from "flowbite-react";
 import { useState, useEffect } from "react";
 import { getRoomTypeOptions, getDepartmentTypeOptions, getRoomTypeName, getDepartmentTypeName } from "../lib/constants";
 import { getOrganisationId } from "../lib/auth";
+import { describeScope, invalidateScopeOptions, matchesScope, useScope } from "../lib/scope";
 
 interface User {
   id: string;
@@ -125,6 +126,18 @@ export default function SettingsPage() {
     }
   };
 
+  // Set in the nav bar and shared with the Dashboard and Reports, so the
+  // device being viewed is the one whose rooms are listed here.
+  const [scope] = useScope("primary");
+  const scopedRooms = (rooms as any[]).filter((room) => matchesScope(room, scope));
+
+  // Viewing one device and adding a room almost always means adding it to that
+  // device, so the form follows the scope until the user picks something else.
+  useEffect(() => {
+    if (scope.basis !== "hid" || !scope.value) return;
+    setFormData((prev) => (prev.hid === scope.value ? prev : { ...prev, hid: scope.value }));
+  }, [scope]);
+
   // A room can hold a HID the organisation no longer lists; keep it in the
   // dropdown so editing the room does not silently drop it.
   const hidOptions =
@@ -241,6 +254,9 @@ export default function SettingsPage() {
       setShowForm(false);
       setEditRoomId(null);
       setTimeout(() => setSuccessMessage("") , 3000);
+      // A new or removed room can add or retire a floor, so the nav bar's
+      // scope list has to be rebuilt.
+      invalidateScopeOptions();
       await fetchRooms();
     } catch (err) {
       console.error("Error adding room:", err);
@@ -280,6 +296,9 @@ export default function SettingsPage() {
 
       setSuccessMessage("Room deleted successfully!");
       setTimeout(() => setSuccessMessage(""), 3000);
+      // A new or removed room can add or retire a floor, so the nav bar's
+      // scope list has to be rebuilt.
+      invalidateScopeOptions();
       await fetchRooms();
     } catch (err) {
       console.error("Error deleting room:", err);
@@ -548,17 +567,19 @@ export default function SettingsPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {rooms.length === 0 ? (
+                        {scopedRooms.length === 0 ? (
                           <tr>
                             <td
                               colSpan={7}
                               className="px-6 py-4 text-center text-gray-600 dark:text-gray-400"
                             >
-                              No rooms added yet
+                              {rooms.length === 0
+                                ? "No rooms added yet"
+                                : `No rooms for ${describeScope(scope)}`}
                             </td>
                           </tr>
                         ) : (
-                          rooms.map((room: any, idx: number) => (
+                          scopedRooms.map((room: any, idx: number) => (
                             <tr
                               key={room.id}
                               className={`border-b border-gray-200 hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-700 ${

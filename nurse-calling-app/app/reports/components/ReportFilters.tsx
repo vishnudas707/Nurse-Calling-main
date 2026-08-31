@@ -1,9 +1,11 @@
 "use client";
 
 import { Card, Select, TextInput } from "flowbite-react";
+import { matchesScope } from "../../lib/scope";
+import type { Scope } from "../../lib/scope";
 import Link from "next/link";
 
-type Room = { id: string; roomName: string };
+type Room = { id: string; roomName: string; hid?: string | null; floor?: number | null };
 
 type ReportFiltersProps = {
   search: string;
@@ -19,6 +21,8 @@ type ReportFiltersProps = {
   endDate: string;
   setEndDate: (v: string) => void;
   rooms: Room[];
+  /** Set in the nav bar; used here only to keep the room list consistent. */
+  scope?: Scope;
   showLagThreshold?: boolean;
   lagThresholdMinutes?: number;
   setLagThresholdMinutes?: (v: number) => void;
@@ -38,6 +42,7 @@ export default function ReportFilters({
   endDate,
   setEndDate,
   rooms,
+  scope,
   showLagThreshold,
   lagThresholdMinutes,
   setLagThresholdMinutes,
@@ -71,7 +76,7 @@ export default function ReportFilters({
         </Select>
         <Select value={roomFilter} onChange={(e) => setRoomFilter(e.target.value)} className="w-full">
           <option value="">All Rooms</option>
-          {rooms.map((room) => (
+          {(scope ? rooms.filter((room) => matchesScope(room, scope)) : rooms).map((room) => (
             <option key={room.id} value={room.id}>
               {room.roomName}
             </option>

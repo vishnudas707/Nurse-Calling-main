@@ -1368,20 +1368,33 @@ app.delete("/api/rooms/:id", async (req: Request, res: Response) => {
 // Fetch active calls from DB (CallStatus table)
 app.get("/api/calls/active", async (req: Request, res: Response) => {
   try {
-    const { organisationId } = req.query;
+    const { organisationId, hid, floor } = req.query;
     if (!organisationId) {
       return res.status(400).json({ success: false, error: "organisationId is required" });
     }
-    console.log('[CALLS ACTIVE] Fetching active calls from DB with room name join', { organisationId });
+    console.log('[CALLS ACTIVE] Fetching active calls from DB with room name join', { organisationId, hid, floor });
     const pool = await getPool();
+    // hid and floor ride along so the dashboard can split one organisation's
+    // calls into per-device or per-floor views without a second round trip.
+    const hasHidColumn = await ensureRoomHidColumn(pool);
     const request = pool.request();
     let query =
-      `SELECT cs.[id], cs.[roomId], cs.[currentStatus], cs.[callType], cs.[dateTime], cs.[isMuted], cs.[dateTimeReset], r.[roomName], r.[organisationId]
+      `SELECT cs.[id], cs.[roomId], cs.[currentStatus], cs.[callType], cs.[dateTime], cs.[isMuted], cs.[dateTimeReset], r.[roomName], r.[organisationId], r.[floor]${
+        hasHidColumn ? `, r.[${ROOM_HID_COLUMN}] AS [hid]` : `, NULL AS [hid]`
+      }
        FROM [CallStatus] cs
        INNER JOIN [Room] r ON cs.[roomId] = r.[id]
        WHERE cs.[currentStatus] <> 0 AND ISNULL(cs.[callType], cs.[currentStatus]) <> ${MISCELLANEOUS_CALL_TYPE}`;
     request.input('organisationId', sql.NVarChar(50), String(organisationId));
     query += ` AND r.[organisationId] = @organisationId`;
+    if (hid && hasHidColumn) {
+      request.input('hid', sql.NVarChar(20), String(hid));
+      query += ` AND r.[${ROOM_HID_COLUMN}] = @hid`;
+    }
+    if (floor !== undefined && floor !== "") {
+      request.input('floor', sql.Int, Number(floor));
+      query += ` AND r.[floor] = @floor`;
+    }
     query += ` ORDER BY cs.[dateTime] DESC`;
     const result = await request.query(query);
     const now = Date.now();
@@ -1396,6 +1409,8 @@ app.get("/api/calls/active", async (req: Request, res: Response) => {
         minutesAgo: row.dateTime ? Math.floor((now - new Date(row.dateTime).getTime()) / 60000) : null,
         muted: row.isMuted === 1 || row.isMuted === true,
         dateTimeReset: row.dateTimeReset,
+        hid: row.hid ?? null,
+        floor: row.floor ?? null,
         organisationId: row.organisationId || String(organisationId),
       }))
     );
@@ -1483,10 +1498,14 @@ app.post("/api/calls", async (req: Request, res: Response) => {
        VALUES (@id, @roomId, @currentStatus, @callType, @dateTime, @isMuted, @mutedDateTime, @dateTimeReset)`
     );
 
+    const hasHidColumn = await ensureRoomHidColumn(pool);
     const roomInfo = await pool.request()
       .input('id', sql.NVarChar(50), roomId)
-      .query(`SELECT roomName FROM [Room] WHERE id = @id`);
-    const roomName = roomInfo.recordset.length ? roomInfo.recordset[0].roomName : '';
+      .query(
+        `SELECT roomName, floor${hasHidColumn ? `, ${ROOM_HID_COLUMN} AS hid` : `, NULL AS hid`} FROM [Room] WHERE id = @id`
+      );
+    const roomRow = roomInfo.recordset[0];
+    const roomName = roomRow ? roomRow.roomName : '';
 
     const newCall = withCallTypeFields(withCallStatusFields({
       id: callId,
@@ -1498,6 +1517,9 @@ app.post("/api/calls", async (req: Request, res: Response) => {
       minutesAgo: 0,
       muted: false,
       dateTimeReset: null,
+      // Lets a split dashboard place the live card in the right pane.
+      hid: roomRow?.hid ?? null,
+      floor: roomRow?.floor ?? null,
       organisationId
     }));
 
@@ -1609,7 +1631,7 @@ app.put("/api/calls/:id", async (req: Request, res: Response) => {
 // Get all call history for report
 app.get("/api/calls/history", async (req: Request, res: Response) => {
   try {
-    const { startDate, endDate, resetStartDate, resetEndDate, search, status, room, muted, organisationId, page = 1, pageSize = 10 } = req.query;
+    const { startDate, endDate, resetStartDate, resetEndDate, search, status, room, muted, organisationId, hid, floor, page = 1, pageSize = 10 } = req.query;
     if (!organisationId) {
       return res.status(400).json({ success: false, error: "organisationId is required" });
     }
@@ -1617,8 +1639,13 @@ app.get("/api/calls/history", async (req: Request, res: Response) => {
     const repeatEnabled = await hasCallRepeatTable(pool);
     const activityLogEnabled = await hasActivityLogTable(pool);
     const resolvedManuallyEnabled = await hasResolvedManuallyColumn(pool);
+    // Reports scope by device or by floor, so both travel with every row and
+    // are filtered in SQL - narrowing after pagination would drop rows.
+    const hasHidColumn = await ensureRoomHidColumn(pool);
     let query =
       `SELECT cs.[id], cs.[roomId], cs.[currentStatus], cs.[callType], cs.[dateTime], cs.[isMuted], cs.[mutedDateTime], cs.[dateTimeReset], r.[roomName], r.[departmentType], r.[roomType], r.[floor]${
+        hasHidColumn ? `, r.[${ROOM_HID_COLUMN}] AS [hid]` : `, NULL AS [hid]`
+      }${
         resolvedManuallyEnabled ? `, cs.[resolvedManually] AS [resolvedManually]` : `, NULL AS [resolvedManually]`
       }${
         repeatEnabled
@@ -1695,6 +1722,14 @@ app.get("/api/calls/history", async (req: Request, res: Response) => {
       where.push('cs.[isMuted] = @muted');
       params.push({ name: 'muted', type: sql.Bit, value: muted === 'true' ? 1 : 0 });
     }
+    if (hid && hasHidColumn) {
+      where.push(`r.[${ROOM_HID_COLUMN}] = @hid`);
+      params.push({ name: 'hid', type: sql.NVarChar(20), value: String(hid) });
+    }
+    if (floor !== undefined && floor !== "") {
+      where.push('r.[floor] = @floor');
+      params.push({ name: 'floor', type: sql.Int, value: Number(floor) });
+    }
     where.push('r.[organisationId] = @organisationId');
     params.push({ name: 'organisationId', type: sql.NVarChar(50), value: String(organisationId) });
     if (where.length > 0) {
@@ -1737,6 +1772,7 @@ app.get("/api/calls/history", async (req: Request, res: Response) => {
         departmentType: row.departmentType,
         roomType: row.roomType,
         floor: row.floor,
+        hid: row.hid ?? null,
         repeatCount: row.repeatCount || 0,
         lastRepeatAt: row.lastRepeatAt,
         repeatDurationMinutes:
@@ -1824,7 +1860,7 @@ async function processCallStatusForRoom(
     .input('roomNo_deviceNo', sql.NVarChar(100), dnum);
   if (hasHidColumn) roomRequest.input('hid', sql.NVarChar(20), hid);
   const roomResult = await roomRequest.query(
-    `SELECT TOP 1 id, roomName FROM [${ROOM_TABLE}]
+    `SELECT TOP 1 id, roomName, floor FROM [${ROOM_TABLE}]
       WHERE organisationId = @organisationId
         AND roomNo_deviceNo = @roomNo_deviceNo
         AND active = 1
@@ -1841,6 +1877,9 @@ async function processCallStatusForRoom(
   const roomId = roomResult.recordset[0].id;
   // Fetched with the id above so the emit paths below need no extra round trip.
   const roomName: string = roomResult.recordset[0].roomName || '';
+  // Carried into the call:new payloads so a split dashboard can route the live
+  // event to the pane watching this device or floor without re-fetching.
+  const roomFloor: number | null = roomResult.recordset[0].floor ?? null;
 
   if (isMiscellaneous) {
     return insertMiscellaneousCall(pool, roomId, dnum);
@@ -1875,6 +1914,8 @@ async function processCallStatusForRoom(
       muted: existing.isMuted === 1 || existing.isMuted === true,
       dateTimeReset: existing.dateTimeReset,
       minutesAgo: 0,
+      hid,
+      floor: roomFloor,
       organisationId: orgId,
     })));
 
@@ -1884,7 +1925,7 @@ async function processCallStatusForRoom(
       entityType: "call",
       entityId: existing.id,
       message: `Repeated call: ${roomName}`,
-      details: { roomId, dnum, hid },
+      details: { roomId, dnum, hid, floor: roomFloor },
     });
 
     return {
@@ -1917,7 +1958,7 @@ async function processCallStatusForRoom(
       entityType: "call",
       entityId: callId,
       message: `Call resolved: room ${dnum} (hid ${hid})`,
-      details: { roomId, dnum, hid },
+      details: { roomId, dnum, hid, floor: roomFloor },
     });
     return { httpStatus: 200, result: "SUCCESS", message: `Room ${dnum}: call status reset` };
   }
@@ -1948,6 +1989,8 @@ async function processCallStatusForRoom(
     muted: false,
     dateTimeReset: isActivate ? null : now,
     minutesAgo: 0,
+    hid,
+    floor: roomFloor,
     organisationId: orgId,
   })));
   await writeActivityLog(pool, {
@@ -1956,7 +1999,7 @@ async function processCallStatusForRoom(
     entityType: "call",
     entityId: callId,
     message: `Device call: ${roomName} — ${getCallTypeName(statusNumber)}`,
-    details: { roomId, dnum, hid, status: statusNumber },
+    details: { roomId, dnum, hid, floor: roomFloor, status: statusNumber },
   });
   return { httpStatus: 200, result: "SUCCESS", message: `Room ${dnum}: new call inserted (status ${statusNumber})` };
 }
@@ -1971,9 +2014,12 @@ app.get("/api/callstatus", (req: Request, res: Response) => {
     queryParams: {
       orgId: "required — organisation id",
       hid: "required — 10-digit hardware id; identifies the room together with orgId and the device number",
-      floor: "optional — accepted for backwards compatibility and ignored",
       "r{roomNo}": "required (one or more) — 2-digit zero-padded room device number with status value (e.g. r01, r02, r22)",
     },
+    // The device does not send a floor. The server reads it off the matched
+    // room and returns it on the call, so a room can be moved between floors in
+    // the settings page without reprogramming the hardware.
+    floorNote: "not a query parameter — resolved from the room and returned on the call",
     statusCodes: CALL_STATUS_MAP,
   });
 });
@@ -1981,8 +2027,10 @@ app.get("/api/callstatus", (req: Request, res: Response) => {
 // Insert record into CallStatus via GET (for device integration)
 // URL: /api/callstatus/insert?orgId=00001&hid=1234567890&r01=1&r02=2&r22=3
 // r{roomNo}=0 reset | 1 normal | 2 emergency | 3 code blue | 4 toilet | 5 miscellaneous (reports only)
-// The room is identified by orgId + hid + device number. `floor` is still
-// accepted so devices already sending it keep working, but it is ignored.
+// The room is identified by orgId + hid + device number. The device sends no
+// floor: it is read off the matched room below and travels back with the call,
+// so moving a room to another floor is a settings-page edit, not a device
+// reprogramming. A `floor` left over in an old device's URL is ignored.
 app.get("/api/callstatus/insert", async (req: Request, res: Response) => {
   const sendCallStatusResult = (httpStatus: number, ok: boolean) =>
     res.status(httpStatus).type("text/plain").send(ok ? "SUCCESS" : "FAILURE");

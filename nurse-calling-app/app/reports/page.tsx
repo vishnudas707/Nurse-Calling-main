@@ -7,6 +7,7 @@ import { Card, Pagination, Select, TextInput, Spinner } from "flowbite-react";
 import { useEffect, useState, useRef, useCallback } from "react";
 import Link from "next/link";
 import { getDepartmentTypeName, getCallTypeName } from "../lib/constants";
+import { describeScope, matchesScope, useScope } from "../lib/scope";
 import {
   callsHistoryUrl,
   fetchRoomsCached,
@@ -38,6 +39,10 @@ export default function ReportsPage() {
   const [mutedFilter, setMutedFilter] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
+
+  // Set in the nav bar and shared with the Dashboard and Settings, so the
+  // report always covers the device the user is looking at.
+  const [scope] = useScope("primary");
 
   const [page, setPage] = useState(1);
   const [pageSizeOption, setPageSizeOption] = useState("10");
@@ -83,6 +88,7 @@ export default function ReportsPage() {
             statusFilter,
             roomFilter,
             mutedFilter,
+            scope,
           },
           page,
           apiPageSize
@@ -107,9 +113,17 @@ export default function ReportsPage() {
     };
     fetchCalls();
     return () => ac.abort();
-  }, [startDate, endDate, debouncedSearch, statusFilter, roomFilter, mutedFilter, page, apiPageSize]);
+  }, [startDate, endDate, debouncedSearch, statusFilter, roomFilter, mutedFilter, scope, page, apiPageSize]);
+
+  // A narrower scope can leave the current page past the end of the results.
+  useEffect(() => {
+    setPage(1);
+  }, [scope]);
 
   const paginatedCalls = sortCallsForReportTable(calls);
+  // Offering rooms the scope excludes would let the two filters contradict and
+  // return nothing.
+  const scopedRooms = rooms.filter((room) => matchesScope(room, scope));
   const rangeStart = totalCount === 0 ? 0 : (page - 1) * apiPageSize + 1;
   const rangeEnd = Math.min(page * apiPageSize, totalCount);
   const showPagination = pageSizeOption !== "all" && totalPages > 1;
@@ -133,6 +147,7 @@ export default function ReportsPage() {
     const ws = XLSX.utils.json_to_sheet(paginatedCalls.map(call => ({
       "Room": call.roomName,
       "Department": getDepartmentTypeName(Number(call.departmentType)),
+      "HID": call.hid || '',
       "Floor": call.floor || '',
       "Call Type": getCallTypeDisplay(call),
       "Status": getCallStateLabel(call),
@@ -154,13 +169,14 @@ export default function ReportsPage() {
     const { default: jsPDF } = await import("jspdf");
     const { default: autoTable } = await import("jspdf-autotable");
     const doc = new jsPDF();
-    doc.text("Call History Report", 14, 16);
+    doc.text(`Call History Report — ${describeScope(scope)}`, 14, 16);
     autoTable(doc, {
       startY: 22,
-      head: [["Room", "Department", "Floor", "Call Type", "Status", "Muted", "Created", "Muted At", "Reset At", "Repeat Count", "Last Repeat At", "Repeat Duration (min)"]],
+      head: [["Room", "Department", "HID", "Floor", "Call Type", "Status", "Muted", "Created", "Muted At", "Reset At", "Repeat Count", "Last Repeat At", "Repeat Duration (min)"]],
       body: paginatedCalls.map(call => [
         call.roomName,
         getDepartmentTypeName(Number(call.departmentType)),
+        call.hid || '',
         call.floor || '',
         getCallTypeDisplay(call),
         getCallStateLabel(call),
@@ -200,7 +216,7 @@ export default function ReportsPage() {
               </Select>
               <Select value={roomFilter} onChange={e => { setRoomFilter(e.target.value); setPage(1); }} className="w-full">
                 <option value="">All Rooms</option>
-                {rooms.map((room) => (
+                {scopedRooms.map((room) => (
                   <option key={room.id} value={room.id}>{room.roomName}</option>
                 ))}
               </Select>
@@ -288,6 +304,7 @@ export default function ReportsPage() {
                       <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">#</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Room</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Department</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">HID</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Floor</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Call Type</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Status</th>
@@ -308,6 +325,7 @@ export default function ReportsPage() {
                         <td className="px-4 py-2 whitespace-nowrap">
                           <span className={`px-2 py-1 rounded text-xs font-semibold ${getDepartmentTypeName(Number(call.departmentType)) === 'Intensive Care' ? 'bg-red-200 text-red-800' : getDepartmentTypeName(Number(call.departmentType)) === 'General Ward' ? 'bg-blue-200 text-blue-800' : getDepartmentTypeName(Number(call.departmentType)) === 'Emergency' ? 'bg-yellow-200 text-yellow-800' : getDepartmentTypeName(Number(call.departmentType)) === 'Surgery' ? 'bg-green-200 text-green-800' : 'bg-gray-200 text-gray-800'}`}>{getDepartmentTypeName(Number(call.departmentType))}</span>
                         </td>
+                        <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-600 dark:text-gray-400">{call.hid || '—'}</td>
                         <td className="px-4 py-2 whitespace-nowrap">{call.floor || ''}</td>
                         <td className="px-4 py-2 whitespace-nowrap">
                           {(() => {
