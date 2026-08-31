@@ -26,16 +26,11 @@ function formatRoomParamKey(roomNo: string): string {
   return digits.padStart(2, "0");
 }
 
-function buildInsertUrl(
-  orgId: string,
-  hid: string,
-  floor: string,
-  rooms: RoomRow[]
-): string {
+// orgId + hid + device number identify the room; a call carries no floor.
+function buildInsertUrl(orgId: string, hid: string, rooms: RoomRow[]): string {
   const params = new URLSearchParams({
     orgId,
     hid,
-    floor,
   });
   for (const { roomNo, status } of rooms) {
     if (!roomNo.trim()) continue;
@@ -46,15 +41,14 @@ function buildInsertUrl(
 
 export default function DeviceEmulatorPage() {
   const [orgId, setOrgId] = useState("00001");
-  const [floor, setFloor] = useState("1");
   const [hid, setHid] = useState("1234567890");
   const [rooms, setRooms] = useState<RoomRow[]>(DEFAULT_ROOMS);
   const [result, setResult] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const previewUrl = useMemo(
-    () => buildInsertUrl(orgId, hid, floor, rooms),
-    [orgId, hid, floor, rooms]
+    () => buildInsertUrl(orgId, hid, rooms),
+    [orgId, hid, rooms]
   );
 
   const updateRoom = (id: string, field: "roomNo" | "status", value: string | number) => {
@@ -110,15 +104,6 @@ export default function DeviceEmulatorPage() {
               value={orgId}
               onChange={(e) => setOrgId(e.target.value)}
               placeholder="00001"
-            />
-          </div>
-          <div>
-            <label className="block text-gray-700 dark:text-gray-200 mb-1">Floor Number</label>
-            <input
-              className="w-full px-3 py-2 border rounded focus:outline-none focus:ring"
-              value={floor}
-              onChange={(e) => setFloor(e.target.value)}
-              placeholder="1"
             />
           </div>
           <div>

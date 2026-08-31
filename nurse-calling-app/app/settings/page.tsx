@@ -30,7 +30,12 @@ export default function SettingsPage() {
     departmentType: "",
     organisationId: "",
     floor: "",
+    hid: "",
   });
+
+  // Hardware IDs registered for this organisation by the super admin - the room
+  // form picks from these so a room is always tied to a device that exists.
+  const [orgHids, setOrgHids] = useState<string[]>([]);
 
   const [showForm, setShowForm] = useState(false);
   const [editRoomId, setEditRoomId] = useState<string | null>(null);
@@ -62,7 +67,7 @@ export default function SettingsPage() {
         setError("Error loading user data");
       }
       
-      await fetchRooms();
+      await Promise.all([fetchRooms(), fetchOrganisationHids()]);
     };
     
     loadInitialData();
@@ -94,6 +99,55 @@ export default function SettingsPage() {
     }
   };
 
+  const fetchOrganisationHids = async () => {
+    try {
+      const orgId = getOrganisationId();
+      if (!orgId) return;
+      const resp = await fetch(`${API_BASE}/api/organisations/${encodeURIComponent(orgId)}`);
+      const data = await resp.json();
+      if (!resp.ok || !data.success) return;
+      const list: string[] = Array.isArray(data.data?.hids)
+        ? data.data.hids.map(String)
+        : data.data?.hid != null
+          ? [String(data.data.hid)]
+          : [];
+      const cleaned = list.filter(Boolean);
+      setOrgHids(cleaned);
+      // One device means there is only one possible answer: fill it in so new
+      // rooms are identifiable without the user picking it every time.
+      if (cleaned.length === 1) {
+        setFormData((prev) => (prev.hid ? prev : { ...prev, hid: cleaned[0] }));
+      }
+    } catch (err) {
+      // Without the list the field falls back to a free-text box, so this is
+      // not worth failing the page over.
+      console.error("Error fetching organisation HIDs:", err);
+    }
+  };
+
+  // A room can hold a HID the organisation no longer lists; keep it in the
+  // dropdown so editing the room does not silently drop it.
+  const hidOptions =
+    formData.hid && !orgHids.includes(formData.hid) ? [...orgHids, formData.hid] : orgHids;
+
+  // Device numbers are per device: every HID has its own r01, r02, ... so the
+  // same numbers can be reused on each. Only a repeat within one HID is a
+  // clash, so both the hint and the warning below are scoped to the selected
+  // HID (rooms with no HID form their own group, matching the server rule).
+  const deviceNosOnSelectedHid = (rooms as any[])
+    .filter(
+      (room) =>
+        room.id !== editRoomId &&
+        !!room.roomNo_deviceNo &&
+        String(room.hid || "") === formData.hid
+    )
+    .map((room) => String(room.roomNo_deviceNo))
+    .sort((a, b) => (Number(a) || 0) - (Number(b) || 0) || a.localeCompare(b));
+
+  const deviceNoTaken =
+    !!formData.roomNo_deviceNo &&
+    deviceNosOnSelectedHid.includes(formData.roomNo_deviceNo.trim());
+
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setFormData((prev) => ({
@@ -114,12 +168,29 @@ export default function SettingsPage() {
     if (!formData.roomType) missingFields.push("Room Type");
     if (!formData.departmentType) missingFields.push("Department Type");
     if (!formData.organisationId) missingFields.push("Organisation ID");
-    if (!formData.floor) missingFields.push("Floor");
+    // A device call is routed by organisation + HID + device number, so a room
+    // that shares a device number with another device needs its HID to be
+    // reachable. Floor is descriptive only and stays optional.
+    if (!formData.hid && orgHids.length > 0) missingFields.push("Hardware ID (HID)");
 
     if (missingFields.length > 0) {
       const errorMsg = `Missing required fields: ${missingFields.join(", ")}`;
       setError(errorMsg);
       console.log("Validation failed:", missingFields, formData);
+      return;
+    }
+
+    if (formData.hid && !/^\d{10}$/.test(formData.hid)) {
+      setError("Hardware ID (HID) must be a 10-digit number");
+      return;
+    }
+
+    if (deviceNoTaken) {
+      setError(
+        `Device No ${formData.roomNo_deviceNo} is already used${
+          formData.hid ? ` on HID ${formData.hid}` : " by a room with no HID"
+        }. Pick another device number, or assign this room to a different HID.`
+      );
       return;
     }
 
@@ -130,7 +201,8 @@ export default function SettingsPage() {
         roomNo_deviceNo: formData.roomNo_deviceNo || null,
         roomType: parseInt(formData.roomType),
         departmentType: parseInt(formData.departmentType),
-        floor: parseInt(formData.floor),
+        floor: formData.floor ? parseInt(formData.floor) : null,
+        hid: formData.hid || null,
       };
       console.log("Sending request:", requestBody);
       let resp, data;
@@ -154,13 +226,17 @@ export default function SettingsPage() {
         return;
       }
       setSuccessMessage(editRoomId ? "Room updated successfully!" : "Room added successfully!");
-      setFormData({ 
-        roomName: "", 
-        roomNo_deviceNo: "", 
-        roomType: "", 
-        departmentType: "", 
+      setFormData({
+        roomName: "",
+        roomNo_deviceNo: "",
+        roomType: "",
+        departmentType: "",
         organisationId: formData.organisationId,
-        floor: ""
+        floor: "",
+        // Rooms are added a device at a time - each HID gets its own r01, r02,
+        // ... - so keep the HID just used instead of making the admin re-pick
+        // it for every room on that device.
+        hid: formData.hid || (orgHids.length === 1 ? orgHids[0] : ""),
       });
       setShowForm(false);
       setEditRoomId(null);
@@ -182,6 +258,7 @@ export default function SettingsPage() {
       departmentType: room.departmentType ? String(room.departmentType) : "",
       organisationId: room.organisationId || user?.organisationId || "",
       floor: room.floor ? String(room.floor) : "",
+      hid: room.hid ? String(room.hid) : "",
     });
   };
   
@@ -209,7 +286,6 @@ export default function SettingsPage() {
       setError("Error connecting to server");
     }
   };
-
   return (
     <div className="page-shell">
       <TopNavBar />
@@ -255,6 +331,19 @@ export default function SettingsPage() {
                       setError("User data not loaded. Please refresh the page.");
                       return;
                     }
+                    if (!showForm && editRoomId) {
+                      // Leaving an edit: start the new room clean.
+                      setEditRoomId(null);
+                      setFormData((prev) => ({
+                        ...prev,
+                        roomName: "",
+                        roomNo_deviceNo: "",
+                        roomType: "",
+                        departmentType: "",
+                        floor: "",
+                        hid: orgHids.length === 1 ? orgHids[0] : "",
+                      }));
+                    }
                     setShowForm(!showForm);
                   }}
                   className="touch-btn w-full bg-teal-700 text-white hover:bg-teal-800 disabled:bg-gray-400 sm:w-auto"
@@ -299,14 +388,64 @@ export default function SettingsPage() {
                           value={formData.roomNo_deviceNo}
                           onChange={handleInputChange}
                           placeholder="e.g., 201 or SIP:201"
-                          className="block w-full rounded-lg border border-gray-300 bg-gray-50 p-2.5 text-gray-900 focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                          className={`block w-full rounded-lg border bg-gray-50 p-2.5 text-gray-900 focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:text-white ${
+                            deviceNoTaken
+                              ? "border-red-500 dark:border-red-500"
+                              : "border-gray-300 dark:border-gray-600"
+                          }`}
                         />
+                        {deviceNoTaken ? (
+                          <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+                            Device No {formData.roomNo_deviceNo} is already used
+                            {formData.hid ? ` on HID ${formData.hid}` : " by a room with no HID"}.
+                          </p>
+                        ) : deviceNosOnSelectedHid.length > 0 ? (
+                          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                            Already used{formData.hid ? ` on HID ${formData.hid}` : " with no HID"}:{" "}
+                            {deviceNosOnSelectedHid.join(", ")}. Each HID has its own device
+                            numbers, so the same numbers can be reused on another HID.
+                          </p>
+                        ) : null}
+                      </div>
+
+                      <div>
+                        <label className="mb-2 block text-sm font-medium text-gray-900 dark:text-white">
+                          Hardware ID (HID){orgHids.length > 0 ? " *" : ""}
+                        </label>
+                        {hidOptions.length > 0 ? (
+                          <select
+                            name="hid"
+                            value={formData.hid}
+                            onChange={handleInputChange}
+                            className="block w-full rounded-lg border border-gray-300 bg-gray-50 p-2.5 text-gray-900 focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                            style={{ height: '46px' }}
+                            required={orgHids.length > 0}
+                          >
+                            <option value="">Select a device</option>
+                            {hidOptions.map((hid) => (
+                              <option key={hid} value={hid}>
+                                {hid}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <input
+                            type="text"
+                            name="hid"
+                            value={formData.hid}
+                            onChange={handleInputChange}
+                            placeholder="10-digit device ID"
+                            inputMode="numeric"
+                            maxLength={10}
+                            className="block w-full rounded-lg border border-gray-300 bg-gray-50 p-2.5 text-gray-900 focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                          />
+                        )}
                       </div>
 
                       <div>
                                               <div>
                                                 <label className="mb-2 block text-sm font-medium text-gray-900 dark:text-white">
-                                                  Floor *
+                                                  Floor
                                                 </label>
                                                 <select
                                                   name="floor"
@@ -314,9 +453,8 @@ export default function SettingsPage() {
                                                   onChange={handleInputChange}
                                                   className="block w-full rounded-lg border border-gray-300 bg-gray-50 p-2.5 text-gray-900 focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
                                                   style={{ height: '46px' }}
-                                                  required
                                                 >
-                                                  <option value="">Select Floor</option>
+                                                  <option value="">Not set</option>
                                                   {[...Array(25)].map((_, i) => (
                                                     <option key={i+1} value={i+1}>{i+1}</option>
                                                   ))}
@@ -393,6 +531,9 @@ export default function SettingsPage() {
                             Device No
                           </th>
                           <th className="px-6 py-3 font-semibold text-gray-900 dark:text-white">
+                            HID
+                          </th>
+                          <th className="px-6 py-3 font-semibold text-gray-900 dark:text-white">
                             Room Type
                           </th>
                           <th className="px-6 py-3 font-semibold text-gray-900 dark:text-white">
@@ -410,7 +551,7 @@ export default function SettingsPage() {
                         {rooms.length === 0 ? (
                           <tr>
                             <td
-                              colSpan={6}
+                              colSpan={7}
                               className="px-6 py-4 text-center text-gray-600 dark:text-gray-400"
                             >
                               No rooms added yet
@@ -432,6 +573,9 @@ export default function SettingsPage() {
                               </td>
                               <td className="px-6 py-4 text-gray-600 dark:text-gray-400">
                                 {room.roomNo_deviceNo || "—"}
+                              </td>
+                              <td className="px-6 py-4 text-gray-600 dark:text-gray-400">
+                                {room.hid || "—"}
                               </td>
                               <td className="px-6 py-4 text-gray-600 dark:text-gray-400">
                                 {getRoomTypeName(Number(room.roomType))}

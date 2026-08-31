@@ -77,7 +77,24 @@ npm start
 ### Room Management
 - `GET /api/rooms` - Get all rooms
 - `POST /api/rooms` - Create a new room
+- `PUT /api/rooms/:id` - Update a room by ID
 - `DELETE /api/rooms/:id` - Delete a room by ID
+
+Create and update accept `hid` (10-digit string, or `null` to clear it): the
+hardware ID of the device that reports the room, picked in the settings page
+from the organisation's registered HIDs. It is stored in `[Room].hid`, which the
+server adds to the table on demand the first time `GET /api/rooms` runs, and it
+is what identifies the room on a device call — see the device call status
+section below. `floor` is descriptive only (stored as `0` when unset) and plays
+no part in routing calls.
+
+Device numbers are scoped to a device, so **every HID gets its own full set** —
+`r01`…`r12` on `2408202601` and `r01`…`r12` on `2408202602` are 24 different
+rooms. What must stay unique is the triple the call lookup resolves on:
+organisation + HID + device number. Reusing a device number on the *same* HID is
+rejected with `409`, since `SELECT TOP 1` would otherwise pick between the two
+rooms arbitrarily. Rooms with no HID form their own group, because an exact HID
+match always outranks a HID-less room in the lookup.
 
 ### Calls
 - `GET /api/calls/active` - Get all active calls
@@ -90,14 +107,14 @@ npm start
 
 **Insert URL example:**
 ```
-GET /api/callstatus/insert?orgId=00001&hid=1234567890&floor=1&r01=1&r02=2&r22=3
+GET /api/callstatus/insert?orgId=00001&hid=1234567890&r01=1&r02=2&r22=3
 ```
 
 | Query | Description |
 |-------|-------------|
 | `orgId` | Organisation ID |
-| `hid` | 10-digit hardware ID |
-| `floor` | Floor number |
+| `hid` | 10-digit hardware ID — matched against `[Room].hid` to pick the room |
+| `floor` | Optional and ignored — still accepted so devices already sending it keep working |
 | `r{roomNo}` | 2-digit zero-padded room device number → status (e.g. `r01`, `r02`, `r22`; repeat for multiple rooms) |
 
 | Status | Meaning | Color |
@@ -107,6 +124,13 @@ GET /api/callstatus/insert?orgId=00001&hid=1234567890&floor=1&r01=1&r02=2&r22=3
 | `2` | Emergency | red |
 | `3` | Code blue | blue |
 | `4` | Toilet | red |
+
+**Room lookup:** a room is identified by `orgId` + `hid` + `r{roomNo}`. Floor is
+not consulted: one device can cover several floors and several devices can share
+one, so it never disambiguated anything the HID does not. A room whose `hid`
+matches the reporting device wins; a room with no `hid` set is still matched, so
+sites that never filled the field in keep working. A room belonging to a
+*different* device is never matched.
 
 **Insert response:** plain text `SUCCESS` when all rooms succeed, otherwise `FAILURE` (no JSON body).
 

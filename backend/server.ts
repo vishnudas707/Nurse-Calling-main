@@ -1000,6 +1000,117 @@ app.get("/api/organisations/:id", async (req: Request, res: Response) => {
 // Room Management Routes (MSSQL-backed)
 const ROOM_TABLE = 'Room';
 
+// ---------------------------------------------------------------------------
+// Room hardware ID (HID)
+//
+// [Room].hid records which of the organisation's devices owns the room, and it
+// is what a device call is routed by: organisation + HID + device number. Device
+// numbers (r01, r02, ...) restart on every device, so the HID is the only thing
+// that makes "r01" unambiguous once an organisation runs more than one device.
+// Floor plays no part in the lookup — it is descriptive only.
+//
+// The column is added on demand: as with CallRepeat and OrganisationHid the
+// service user may have no DDL rights in production, so every caller falls back
+// to the old organisation + device number behaviour without it.
+const ROOM_HID_COLUMN = "hid";
+let roomHidColumnCache: boolean | null = null;
+
+async function ensureRoomHidColumn(pool: any): Promise<boolean> {
+  if (roomHidColumnCache !== null) return roomHidColumnCache;
+  try {
+    const existing = await pool
+      .request()
+      .query(`SELECT COL_LENGTH(N'[dbo].[${ROOM_TABLE}]', N'${ROOM_HID_COLUMN}') AS colLen`);
+    if (existing?.recordset?.[0]?.colLen != null) {
+      roomHidColumnCache = true;
+      return true;
+    }
+  } catch (err) {
+    console.error("[Room] hid column check failed:", err);
+    roomHidColumnCache = false;
+    return false;
+  }
+
+  try {
+    await pool
+      .request()
+      .query(`ALTER TABLE [dbo].[${ROOM_TABLE}] ADD ${ROOM_HID_COLUMN} NVARCHAR(20) NULL`);
+    console.log("[Room] hid column added");
+    roomHidColumnCache = true;
+    return true;
+  } catch (err) {
+    console.error("[Room] Could not add the hid column, rooms stay HID-less:", err);
+    roomHidColumnCache = false;
+    return false;
+  }
+}
+
+/**
+ * Validates the optional `hid` on a room payload. A blank value clears it, so
+ * single-device sites can leave the field alone.
+ */
+function normaliseRoomHid(value: unknown):
+  | { ok: true; hid: string | null }
+  | { ok: false; error: string } {
+  if (value === undefined || value === null || value === "") return { ok: true, hid: null };
+  const hid = String(value).trim();
+  if (!HID_PATTERN.test(hid)) {
+    return { ok: false, error: `hid must be a 10-digit number (got "${hid}")` };
+  }
+  return { ok: true, hid };
+}
+
+/**
+ * Device numbers are scoped to a device, so every HID may reuse the same set —
+ * r01 on 2408202601 and r01 on 2408202602 are two different rooms. What must
+ * stay unique is the pair the call lookup resolves on: (organisation, hid,
+ * device number). A second room on the same HID with the same device number
+ * would be picked arbitrarily by `SELECT TOP 1`, so it is rejected here.
+ *
+ * A NULL hid is treated as its own device: it only clashes with another
+ * HID-less room, because an exact HID match always outranks it in the lookup.
+ *
+ * Returns the clashing room's name, or null when the pair is free.
+ */
+async function findRoomDeviceNoClash(
+  pool: any,
+  organisationId: string,
+  roomNo_deviceNo: string | null,
+  hid: string | null,
+  excludeRoomId?: string
+): Promise<string | null> {
+  if (!roomNo_deviceNo) return null;
+  if (!(await ensureRoomHidColumn(pool))) return null;
+
+  const request = pool
+    .request()
+    .input("organisationId", sql.NVarChar(50), String(organisationId))
+    .input("roomNo_deviceNo", sql.NVarChar(100), roomNo_deviceNo)
+    .input("hid", sql.NVarChar(20), hid);
+  if (excludeRoomId) request.input("excludeId", sql.NVarChar(50), excludeRoomId);
+
+  const clash = await request.query(
+    `SELECT TOP 1 roomName FROM [${ROOM_TABLE}]
+      WHERE organisationId = @organisationId
+        AND roomNo_deviceNo = @roomNo_deviceNo
+        AND active = 1
+        AND ((${ROOM_HID_COLUMN} = @hid) OR (${ROOM_HID_COLUMN} IS NULL AND @hid IS NULL))
+        ${excludeRoomId ? "AND id <> @excludeId" : ""}`
+  );
+  return clash.recordset.length ? String(clash.recordset[0].roomName) : null;
+}
+
+/** The 409 message both room routes return for a clashing device number. */
+function roomDeviceNoClashMessage(
+  roomNo_deviceNo: string,
+  hid: string | null,
+  takenBy: string
+): string {
+  return hid
+    ? `Device No ${roomNo_deviceNo} is already used by room "${takenBy}" on HID ${hid}. Pick another device number, or assign this room to a different HID.`
+    : `Device No ${roomNo_deviceNo} is already used by room "${takenBy}" among the rooms with no HID. Pick another device number, or assign this room to a HID.`;
+}
+
 // GET all rooms
 app.get("/api/rooms", async (req: Request, res: Response) => {
   try {
@@ -1008,6 +1119,9 @@ app.get("/api/rooms", async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: "organisationId is required" });
     }
     const pool = await getPool();
+    // Called on every settings-page load, so this is where the column gets
+    // added the first time an existing database is upgraded.
+    await ensureRoomHidColumn(pool);
     const request = pool.request();
     let query = `SELECT * FROM [${ROOM_TABLE}] WHERE active = 1`;
     request.input('organisationId', sql.NVarChar(50), String(organisationId));
@@ -1072,13 +1186,28 @@ app.post("/api/rooms", async (req: Request, res: Response) => {
 
     if (!organisationId || !roomName || roomType === undefined || departmentType === undefined) {
       console.log('[ROOMS POST] Validation failed');
-      return res.status(400).json({ 
-        error: "organisationId, roomName, roomType, departmentType are required" 
+      return res.status(400).json({
+        error: "organisationId, roomName, roomType, departmentType are required"
       });
     }
 
+    const parsedHid = normaliseRoomHid(req.body.hid);
+    if (!parsedHid.ok) {
+      return res.status(400).json({ success: false, error: parsedHid.error });
+    }
+    const hid = parsedHid.hid;
+
     const pool = await getPool();
-    
+
+    const deviceNo = roomNo_deviceNo ? String(roomNo_deviceNo) : null;
+    const takenBy = await findRoomDeviceNoClash(pool, organisationId, deviceNo, hid);
+    if (takenBy) {
+      return res.status(409).json({
+        success: false,
+        error: roomDeviceNoClashMessage(String(deviceNo), hid, takenBy),
+      });
+    }
+
     // Generate unique room ID: ROOM_{timestamp}_{random}
     const roomId = `ROOM_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
@@ -1089,11 +1218,16 @@ app.post("/api/rooms", async (req: Request, res: Response) => {
     insertReq.input('roomNo_deviceNo', sql.NVarChar(100), roomNo_deviceNo || null);
     insertReq.input('roomType', sql.Int, roomType);
     insertReq.input('departmentType', sql.Int, departmentType);
-    insertReq.input('floor', sql.Int, floor !== undefined ? floor : 0);
+    // [Room].floor is NOT NULL and purely descriptive since calls are routed by
+    // HID, so an unset floor is stored as 0 rather than rejected.
+    insertReq.input('floor', sql.Int, Number.isFinite(Number(floor)) ? Number(floor) : 0);
     insertReq.input('active', sql.Bit, 1);
 
-    const insertQuery = `INSERT INTO [${ROOM_TABLE}] (id, organisationId, roomName, roomNo_deviceNo, roomType, departmentType, floor, active) 
-               VALUES (@id, @organisationId, @roomName, @roomNo_deviceNo, @roomType, @departmentType, @floor, @active)`;
+    const hasHidColumn = await ensureRoomHidColumn(pool);
+    if (hasHidColumn) insertReq.input('hid', sql.NVarChar(20), hid);
+
+    const insertQuery = `INSERT INTO [${ROOM_TABLE}] (id, organisationId, roomName, roomNo_deviceNo, roomType, departmentType, floor, active${hasHidColumn ? `, ${ROOM_HID_COLUMN}` : ""})
+               VALUES (@id, @organisationId, @roomName, @roomNo_deviceNo, @roomType, @departmentType, @floor, @active${hasHidColumn ? ", @hid" : ""})`;
     
     console.log('[ROOMS POST] Executing query:', insertQuery);
     await insertReq.query(insertQuery);
@@ -1106,12 +1240,12 @@ app.post("/api/rooms", async (req: Request, res: Response) => {
       entityType: "room",
       entityId: roomId,
       message: `Room created: ${roomName}`,
-      details: { roomNo_deviceNo, floor, roomType, departmentType },
+      details: { roomNo_deviceNo, floor, roomType, departmentType, hid },
     });
 
     return res.status(201).json({
       success: true,
-      data: { id: roomId, organisationId, roomName, roomNo_deviceNo, roomType, departmentType, active: 1 },
+      data: { id: roomId, organisationId, roomName, roomNo_deviceNo, roomType, departmentType, hid, active: 1 },
     });
   } catch (err) {
     console.error('[ROOMS POST] Error details:', err);
@@ -1126,8 +1260,14 @@ app.put("/api/rooms/:id", async (req: Request, res: Response) => {
     const { id } = req.params;
     const { organisationId, roomName, roomNo_deviceNo, roomType, departmentType, floor, active } = req.body;
 
+    const parsedHid = normaliseRoomHid(req.body.hid);
+    if (!parsedHid.ok) {
+      return res.status(400).json({ success: false, error: parsedHid.error });
+    }
+    const hid = parsedHid.hid;
+
     const pool = await getPool();
-    
+
     // Check if room exists
     const checkReq = pool.request();
     checkReq.input('id', sql.NVarChar(50), id);
@@ -1137,6 +1277,15 @@ app.put("/api/rooms/:id", async (req: Request, res: Response) => {
       return res.status(404).json({ success: false, error: "Room not found" });
     }
 
+    const deviceNo = roomNo_deviceNo ? String(roomNo_deviceNo) : null;
+    const takenBy = await findRoomDeviceNoClash(pool, organisationId, deviceNo, hid, id);
+    if (takenBy) {
+      return res.status(409).json({
+        success: false,
+        error: roomDeviceNoClashMessage(String(deviceNo), hid, takenBy),
+      });
+    }
+
     const updateReq = pool.request();
     updateReq.input('id', sql.NVarChar(50), id);
     updateReq.input('organisationId', sql.NVarChar(50), organisationId);
@@ -1144,12 +1293,15 @@ app.put("/api/rooms/:id", async (req: Request, res: Response) => {
     updateReq.input('roomNo_deviceNo', sql.NVarChar(100), roomNo_deviceNo || null);
     updateReq.input('roomType', sql.Int, roomType);
     updateReq.input('departmentType', sql.Int, departmentType);
-    updateReq.input('floor', sql.Int, floor !== undefined && floor !== null ? floor : null);
+    updateReq.input('floor', sql.Int, Number.isFinite(Number(floor)) ? Number(floor) : 0);
     updateReq.input('active', sql.Bit, active !== undefined ? active : 1);
 
-    const updateQuery = `UPDATE [${ROOM_TABLE}] 
-               SET organisationId = @organisationId, roomName = @roomName, roomNo_deviceNo = @roomNo_deviceNo, 
-                 roomType = @roomType, departmentType = @departmentType, floor = @floor, active = @active 
+    const hasHidColumn = await ensureRoomHidColumn(pool);
+    if (hasHidColumn) updateReq.input('hid', sql.NVarChar(20), hid);
+
+    const updateQuery = `UPDATE [${ROOM_TABLE}]
+               SET organisationId = @organisationId, roomName = @roomName, roomNo_deviceNo = @roomNo_deviceNo,
+                 roomType = @roomType, departmentType = @departmentType, floor = @floor, active = @active${hasHidColumn ? `, ${ROOM_HID_COLUMN} = @hid` : ""}
                WHERE id = @id`;
     
     await updateReq.query(updateQuery);
@@ -1160,12 +1312,12 @@ app.put("/api/rooms/:id", async (req: Request, res: Response) => {
       entityType: "room",
       entityId: id,
       message: `Room updated: ${roomName}`,
-      details: { roomNo_deviceNo, floor, roomType, departmentType },
+      details: { roomNo_deviceNo, floor, roomType, departmentType, hid },
     });
 
     return res.status(200).json({
       success: true,
-      data: { id, organisationId, roomName, roomNo_deviceNo, roomType, departmentType, active },
+      data: { id, organisationId, roomName, roomNo_deviceNo, roomType, departmentType, hid, active },
     });
   } catch (err) {
     console.error('[ROOMS PUT/:id] Error:', err);
@@ -1652,7 +1804,7 @@ async function insertMiscellaneousCall(
 async function processCallStatusForRoom(
   pool: Awaited<ReturnType<typeof getPool>>,
   orgId: string,
-  floor: string,
+  hid: string,
   dnum: string,
   statusNumber: number,
   repeatEnabled: boolean
@@ -1661,15 +1813,30 @@ async function processCallStatusForRoom(
   const isMiscellaneous = statusNumber === MISCELLANEOUS_CALL_TYPE;
   const isActivate = !Number.isNaN(statusNumber) && statusNumber !== 0 && !isMiscellaneous;
 
-  const roomResult = await pool.request()
+  // Organisation + HID + device number identifies the room. The room tagged
+  // with the reporting device wins; rooms with no HID stay reachable so sites
+  // that never filled the field in keep working, while a room belonging to
+  // another device is never picked up by this one. Floor is not consulted: two
+  // devices may well cover the same floor, and one device may span several.
+  const hasHidColumn = await ensureRoomHidColumn(pool);
+  const roomRequest = pool.request()
     .input('organisationId', sql.NVarChar(50), String(orgId))
-    .input('roomNo_deviceNo', sql.NVarChar(100), dnum)
-    .input('floor', sql.Int, Number(floor))
-    .query(
-      `SELECT id, roomName FROM [Room] WHERE organisationId = @organisationId AND roomNo_deviceNo = @roomNo_deviceNo AND floor = @floor`
-    );
+    .input('roomNo_deviceNo', sql.NVarChar(100), dnum);
+  if (hasHidColumn) roomRequest.input('hid', sql.NVarChar(20), hid);
+  const roomResult = await roomRequest.query(
+    `SELECT TOP 1 id, roomName FROM [${ROOM_TABLE}]
+      WHERE organisationId = @organisationId
+        AND roomNo_deviceNo = @roomNo_deviceNo
+        AND active = 1
+        ${hasHidColumn ? `AND (${ROOM_HID_COLUMN} = @hid OR ${ROOM_HID_COLUMN} IS NULL)` : ""}
+      ORDER BY ${hasHidColumn ? `CASE WHEN ${ROOM_HID_COLUMN} = @hid THEN 0 ELSE 1 END, ` : ""}id`
+  );
   if (!roomResult.recordset.length) {
-    return { httpStatus: 404, result: "FAILURE", error: `Room not found for room ${dnum} on floor ${floor}` };
+    return {
+      httpStatus: 404,
+      result: "FAILURE",
+      error: `Room not found for device number ${dnum} on hid ${hid}`,
+    };
   }
   const roomId = roomResult.recordset[0].id;
   // Fetched with the id above so the emit paths below need no extra round trip.
@@ -1717,7 +1884,7 @@ async function processCallStatusForRoom(
       entityType: "call",
       entityId: existing.id,
       message: `Repeated call: ${roomName}`,
-      details: { roomId, dnum, floor },
+      details: { roomId, dnum, hid },
     });
 
     return {
@@ -1749,8 +1916,8 @@ async function processCallStatusForRoom(
       action: "call.resolved",
       entityType: "call",
       entityId: callId,
-      message: `Call resolved: room ${dnum} (floor ${floor})`,
-      details: { roomId, dnum, floor },
+      message: `Call resolved: room ${dnum} (hid ${hid})`,
+      details: { roomId, dnum, hid },
     });
     return { httpStatus: 200, result: "SUCCESS", message: `Room ${dnum}: call status reset` };
   }
@@ -1789,7 +1956,7 @@ async function processCallStatusForRoom(
     entityType: "call",
     entityId: callId,
     message: `Device call: ${roomName} — ${getCallTypeName(statusNumber)}`,
-    details: { roomId, dnum, floor, status: statusNumber },
+    details: { roomId, dnum, hid, status: statusNumber },
   });
   return { httpStatus: 200, result: "SUCCESS", message: `Room ${dnum}: new call inserted (status ${statusNumber})` };
 }
@@ -1800,11 +1967,11 @@ app.get("/api/callstatus", (req: Request, res: Response) => {
   res.status(200).json({
     insertEndpoint: `${base}/api/callstatus/insert`,
     method: "GET",
-    example: `${base}/api/callstatus/insert?orgId=00001&hid=1234567890&floor=1&r01=1&r02=2&r22=3`,
+    example: `${base}/api/callstatus/insert?orgId=00001&hid=1234567890&r01=1&r02=2&r22=3`,
     queryParams: {
       orgId: "required — organisation id",
-      hid: "required — 10-digit hardware id",
-      floor: "required — floor number",
+      hid: "required — 10-digit hardware id; identifies the room together with orgId and the device number",
+      floor: "optional — accepted for backwards compatibility and ignored",
       "r{roomNo}": "required (one or more) — 2-digit zero-padded room device number with status value (e.g. r01, r02, r22)",
     },
     statusCodes: CALL_STATUS_MAP,
@@ -1812,21 +1979,22 @@ app.get("/api/callstatus", (req: Request, res: Response) => {
 });
 
 // Insert record into CallStatus via GET (for device integration)
-// URL: /api/callstatus/insert?orgId=00001&hid=1234567890&floor=1&r01=1&r02=2&r22=3
+// URL: /api/callstatus/insert?orgId=00001&hid=1234567890&r01=1&r02=2&r22=3
 // r{roomNo}=0 reset | 1 normal | 2 emergency | 3 code blue | 4 toilet | 5 miscellaneous (reports only)
+// The room is identified by orgId + hid + device number. `floor` is still
+// accepted so devices already sending it keep working, but it is ignored.
 app.get("/api/callstatus/insert", async (req: Request, res: Response) => {
   const sendCallStatusResult = (httpStatus: number, ok: boolean) =>
     res.status(httpStatus).type("text/plain").send(ok ? "SUCCESS" : "FAILURE");
 
-  const { orgId, hid, dnum, status, floor } = req.query;
-  if (!orgId || !hid || floor === undefined || floor === "") {
+  const { orgId, hid, dnum, status } = req.query;
+  if (!orgId || !hid) {
     return sendCallStatusResult(400, false);
   }
-  const hidStr = String(hid);
-  if (!/^\d{10}$/.test(hidStr)) {
+  const hidStr = String(Array.isArray(hid) ? hid[0] : hid);
+  if (!HID_PATTERN.test(hidStr)) {
     return sendCallStatusResult(400, false);
   }
-  const floorStr = String(Array.isArray(floor) ? floor[0] : floor);
 
   let roomUpdates = parseRoomStatusParams(req.query);
   if (roomUpdates.length === 0) {
@@ -1852,7 +2020,7 @@ app.get("/api/callstatus/insert", async (req: Request, res: Response) => {
       const outcome = await processCallStatusForRoom(
         pool,
         String(orgId),
-        floorStr,
+        hidStr,
         roomNo,
         statusNumber,
         repeatEnabled
