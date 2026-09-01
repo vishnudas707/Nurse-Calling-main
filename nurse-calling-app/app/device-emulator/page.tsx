@@ -29,11 +29,11 @@ function formatRoomParamKey(roomNo: string): string {
 // orgId + hid + device number identify the room; a call carries no floor.
 //
 // In beacon mode the same URL carries a valueless `beacon` flag and the rooms
-// are read as the device's snapshot of what is still ringing rather than as new
-// calls - anything the dashboard still has open for this hid and the beacon
-// does not list is resolved. The flag is spliced in as a bare `&beacon` (not
-// via URLSearchParams, which would write `beacon=`) so the preview matches the
-// URL the real panels send.
+// are read as the device's snapshot of everything ringing on its panel: the
+// dashboard raises what it is missing, restates what has changed type, and
+// resolves every open call the beacon does not list. The flag is spliced in as
+// a bare `&beacon` (not via URLSearchParams, which would write `beacon=`) so
+// the preview matches the URL the real panels send.
 function buildInsertUrl(orgId: string, hid: string, rooms: RoomRow[], beacon: boolean): string {
   const params = new URLSearchParams({
     orgId,
@@ -142,8 +142,9 @@ export default function DeviceEmulatorPage() {
             <span className="text-sm text-gray-700 dark:text-gray-200">
               <span className="font-semibold">Beacon (snapshot)</span>
               <span className="block text-xs text-gray-600 dark:text-gray-400">
-                Rooms below are what is still ringing on the device, not new calls. Anything the
-                dashboard still shows for this HID and the beacon leaves out (or sends as 0) is
+                Rooms below are the device&apos;s snapshot of everything ringing on its panel. Any
+                room here with no call on the dashboard is raised and shows up there; anything the
+                dashboard still shows for this HID that the beacon leaves out (or sends as 0) is
                 resolved. Remove every room to send an all-clear beacon.
               </span>
             </span>

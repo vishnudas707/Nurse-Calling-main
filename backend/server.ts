@@ -2031,22 +2031,30 @@ async function processCallStatusForRoom(
 // ---------------------------------------------------------------------------
 // Beacon reconciliation
 //
-// A beacon URL is the device's periodic snapshot of what is still ringing on
-// its own panel:
+// A beacon URL is the device's periodic snapshot of every room ringing on its
+// own panel:
 //
 //   /api/callstatus/insert?orgId=00003&hid=2408202601&beacon&r01=1&r03=3
 //
-// Only what the device still holds active is listed. A room it has already
+// Everything the device still holds active is listed. A room it has already
 // cleared is sent as 0 (r02=0) or simply left out, and a beacon carrying no
-// r-params at all means the panel is completely clear. Dashboard calls stay
-// open until something resets them, so a call the device dropped without the
-// reset landing here would sit active forever - the beacon closes that gap:
-// every call open for this device that the beacon does not list as active is
-// resolved below and disappears from the dashboard live.
+// r-params at all means the panel is completely clear.
 //
-// A beacon never opens a call. It repeats state the insert URL already
-// delivered when the call was raised, so treating it as a call would log a
-// repeat and re-announce every listed room on every beacon tick.
+// The snapshot is authoritative in both directions, so it pulls the dashboard
+// back into line with the panel:
+//
+//   - a call open here that the beacon does not list has been cleared on the
+//     device, so it is resolved (dashboard calls stay open until something
+//     resets them, and a reset that never arrived would leave one ringing for
+//     ever);
+//   - a room the beacon lists with no call open here never reached us when it
+//     was raised, so the call is opened now and lands on the dashboard;
+//   - a room listed at a different status than the one open here is moved to
+//     the status the panel reports.
+//
+// What a beacon never does is re-raise a call it already agrees with: a room
+// listed at the status the dashboard already shows is left untouched, so a
+// beacon tick logs no repeat and re-announces nothing.
 const BEACON_PARAM = "beacon";
 
 function hasBeaconFlag(query: Request["query"]): boolean {
@@ -2057,7 +2065,7 @@ function hasBeaconFlag(query: Request["query"]): boolean {
 // compare on the digits so a device number matches however it was typed in.
 function normalizeDeviceNo(value: unknown): string {
   const raw = String(value ?? "").trim();
-  const digits = raw.replace(/D/g, "");
+  const digits = raw.replace(/[^0-9]/g, "");
   return digits ? String(parseInt(digits, 10)) : raw;
 }
 
@@ -2067,72 +2075,172 @@ async function processBeaconSnapshot(
   hid: string,
   roomUpdates: { roomNo: string; status: number }[]
 ): Promise<{ httpStatus: number; result: string; message: string }> {
-  const stillRinging = new Set(
-    roomUpdates.filter((r) => r.status !== 0).map((r) => normalizeDeviceNo(r.roomNo))
-  );
+  // Device number -> the status the panel reports it ringing at. A 0 is the
+  // device saying that room is clear, which is the same as leaving it out.
+  const ringing = new Map<string, number>();
+  for (const { roomNo, status } of roomUpdates) {
+    if (status === 0) continue;
+    ringing.set(normalizeDeviceNo(roomNo), status);
+  }
 
   // Same room-matching rule as a call insert - rooms tagged with this device
-  // plus rooms with no HID filled in - so a beacon closes exactly the calls
-  // this device is able to open, and never another device's.
+  // plus rooms with no HID filled in - so a beacon touches exactly the calls
+  // this device is able to raise, and never another device's.
   const hasHidColumn = await ensureRoomHidColumn(pool);
+  const roomFilter = hasHidColumn
+    ? `AND (r.[${ROOM_HID_COLUMN}] = @hid OR r.[${ROOM_HID_COLUMN}] IS NULL)`
+    : "";
+
   const openReq = pool.request().input("organisationId", sql.NVarChar(50), orgId);
   if (hasHidColumn) openReq.input("hid", sql.NVarChar(20), hid);
   const openCalls = await openReq.query(
-    `SELECT cs.[id], cs.[roomId], r.[roomNo_deviceNo] AS deviceNo, r.[roomName], r.[floor]
+    `SELECT cs.[id], cs.[roomId], cs.[currentStatus], cs.[callType],
+            r.[roomNo_deviceNo] AS deviceNo, r.[roomName], r.[floor]
        FROM [CallStatus] cs
        INNER JOIN [${ROOM_TABLE}] r ON cs.[roomId] = r.[id]
       WHERE cs.[currentStatus] <> 0
         AND ISNULL(cs.[callType], cs.[currentStatus]) <> ${MISCELLANEOUS_CALL_TYPE}
         AND r.[organisationId] = @organisationId
         AND r.[active] = 1
-        ${hasHidColumn ? `AND (r.[${ROOM_HID_COLUMN}] = @hid OR r.[${ROOM_HID_COLUMN}] IS NULL)` : ""}`
+        ${roomFilter}`
   );
-
-  const cleared = openCalls.recordset.filter(
-    (row: any) => !stillRinging.has(normalizeDeviceNo(row.deviceNo))
-  );
-  if (cleared.length === 0) {
-    return {
-      httpStatus: 200,
-      result: "SUCCESS",
-      message: `Beacon ${hid}: nothing to resolve (${stillRinging.size} call(s) still active on the device)`,
-    };
-  }
 
   const resolvedManuallyEnabled = await hasResolvedManuallyColumn(pool);
-  for (const row of cleared) {
-    const resetReq = pool.request()
-      .input("id", sql.NVarChar(50), row.id)
-      .input("dateTimeReset", sql.DateTime, new Date());
-    // Cleared at the device, not by a nurse on the dashboard.
-    if (resolvedManuallyEnabled) resetReq.input("resolvedManually", sql.Bit, 0);
-    await resetReq.query(
-      resolvedManuallyEnabled
-        ? `UPDATE [CallStatus] SET currentStatus = 0, dateTimeReset = @dateTimeReset, resolvedManually = @resolvedManually WHERE id = @id`
-        : `UPDATE [CallStatus] SET currentStatus = 0, dateTimeReset = @dateTimeReset WHERE id = @id`
-    );
-    io.to(`org_${orgId}`).emit("call:status", { id: row.id, status: 0 });
-    await writeActivityLog(pool, {
-      organisationId: orgId,
-      action: BEACON_RESOLVE_ACTION,
-      entityType: "call",
-      entityId: row.id,
-      message: `Call resolved by beacon: ${row.roomName || row.deviceNo} (hid ${hid})`,
-      details: {
-        roomId: row.roomId,
-        dnum: normalizeDeviceNo(row.deviceNo),
-        hid,
-        floor: row.floor ?? null,
-        source: "beacon",
-      },
-    });
+  const openDeviceNos = new Set<string>();
+  let resolved = 0;
+  let restated = 0;
+
+  for (const row of openCalls.recordset) {
+    const deviceNo = normalizeDeviceNo(row.deviceNo);
+    const beaconStatus = ringing.get(deviceNo);
+
+    if (beaconStatus === undefined) {
+      // Cleared on the device while the dashboard still showed it ringing.
+      const resetReq = pool.request()
+        .input("id", sql.NVarChar(50), row.id)
+        .input("dateTimeReset", sql.DateTime, new Date());
+      // Cleared at the device, not by a nurse on the dashboard.
+      if (resolvedManuallyEnabled) resetReq.input("resolvedManually", sql.Bit, 0);
+      await resetReq.query(
+        resolvedManuallyEnabled
+          ? `UPDATE [CallStatus] SET currentStatus = 0, dateTimeReset = @dateTimeReset, resolvedManually = @resolvedManually WHERE id = @id`
+          : `UPDATE [CallStatus] SET currentStatus = 0, dateTimeReset = @dateTimeReset WHERE id = @id`
+      );
+      io.to(`org_${orgId}`).emit("call:status", { id: row.id, status: 0 });
+      await writeActivityLog(pool, {
+        organisationId: orgId,
+        action: BEACON_RESOLVE_ACTION,
+        entityType: "call",
+        entityId: row.id,
+        message: `Call resolved by beacon: ${row.roomName || deviceNo} (hid ${hid})`,
+        details: { roomId: row.roomId, dnum: deviceNo, hid, floor: row.floor ?? null, source: "beacon" },
+      });
+      resolved += 1;
+      continue;
+    }
+
+    openDeviceNos.add(deviceNo);
+
+    // Still ringing, but the panel has since moved it to another call type -
+    // the device wins, so the open call is restated rather than duplicated.
+    if (beaconStatus !== row.currentStatus) {
+      await pool.request()
+        .input("id", sql.NVarChar(50), row.id)
+        .input("currentStatus", sql.Int, beaconStatus)
+        .input("callType", sql.Int, beaconStatus)
+        .query(`UPDATE [CallStatus] SET currentStatus = @currentStatus, callType = @callType WHERE id = @id`);
+      io.to(`org_${orgId}`).emit("call:status", { id: row.id, status: beaconStatus });
+      restated += 1;
+    }
   }
 
-  return {
-    httpStatus: 200,
-    result: "SUCCESS",
-    message: `Beacon ${hid}: resolved ${cleared.length} call(s) already cleared on the device`,
-  };
+  // Rooms the beacon reports ringing with no call open here: the raise never
+  // reached us, so the call is opened now and shows on the dashboard. A
+  // miscellaneous status is skipped - it is a reports-only event that is never
+  // active, so it has no business in a snapshot of what is ringing.
+  const missing = [...ringing].filter(
+    ([deviceNo, status]) => !openDeviceNos.has(deviceNo) && status !== MISCELLANEOUS_CALL_TYPE
+  );
+  let raised = 0;
+  const unknownRooms: string[] = [];
+
+  if (missing.length > 0) {
+    const roomReq = pool.request().input("organisationId", sql.NVarChar(50), orgId);
+    if (hasHidColumn) roomReq.input("hid", sql.NVarChar(20), hid);
+    const roomRows = await roomReq.query(
+      `SELECT r.[id], r.[roomName], r.[roomNo_deviceNo] AS deviceNo, r.[floor]
+         FROM [${ROOM_TABLE}] r
+        WHERE r.[organisationId] = @organisationId
+          AND r.[active] = 1
+          ${roomFilter}
+        ORDER BY ${hasHidColumn ? `CASE WHEN r.[${ROOM_HID_COLUMN}] = @hid THEN 0 ELSE 1 END, ` : ""}r.[id]`
+    );
+    // The ORDER BY puts this device's own rooms first, so the first row wins
+    // when a device number is also used by a room with no HID filled in.
+    const roomsByDeviceNo = new Map<string, any>();
+    for (const row of roomRows.recordset) {
+      const key = normalizeDeviceNo(row.deviceNo);
+      if (!roomsByDeviceNo.has(key)) roomsByDeviceNo.set(key, row);
+    }
+
+    for (const [deviceNo, status] of missing) {
+      const room = roomsByDeviceNo.get(deviceNo);
+      if (!room) {
+        unknownRooms.push(deviceNo);
+        continue;
+      }
+      const callId = `CALL_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+      const now = new Date();
+      const insertReq = pool.request();
+      insertReq.input("id", sql.NVarChar(50), callId);
+      insertReq.input("roomId", sql.NVarChar(50), room.id);
+      insertReq.input("currentStatus", sql.Int, status);
+      insertReq.input("callType", sql.Int, status);
+      insertReq.input("dateTime", sql.DateTime, now);
+      insertReq.input("isMuted", sql.Int, 0);
+      insertReq.input("mutedDateTime", sql.DateTime, null);
+      insertReq.input("dateTimeReset", sql.DateTime, null);
+      await insertReq.query(
+        `INSERT INTO [CallStatus] (id, roomId, currentStatus, callType, dateTime, isMuted, mutedDateTime, dateTimeReset)
+         VALUES (@id, @roomId, @currentStatus, @callType, @dateTime, @isMuted, @mutedDateTime, @dateTimeReset)`
+      );
+      io.to(`org_${orgId}`).emit("call:new", withCallTypeFields(withCallStatusFields({
+        id: callId,
+        roomId: room.id,
+        roomName: room.roomName || "",
+        status,
+        callType: status,
+        timestamp: now,
+        muted: false,
+        dateTimeReset: null,
+        minutesAgo: 0,
+        hid,
+        floor: room.floor ?? null,
+        organisationId: orgId,
+      })));
+      await writeActivityLog(pool, {
+        organisationId: orgId,
+        action: "call.created",
+        entityType: "call",
+        entityId: callId,
+        message: `Beacon call: ${room.roomName || deviceNo} - ${getCallTypeName(status)}`,
+        details: { roomId: room.id, dnum: deviceNo, hid, floor: room.floor ?? null, status, source: "beacon" },
+      });
+      raised += 1;
+    }
+  }
+
+  const summary =
+    `Beacon ${hid}: raised ${raised}, resolved ${resolved}, restated ${restated}, ` +
+    `unchanged ${openDeviceNos.size - restated}` +
+    (unknownRooms.length ? `, no room for device number(s) ${unknownRooms.join(", ")}` : "");
+
+  // An unconfigured room number is reported the way a plain insert reports it,
+  // so a beacon listing a room nobody has set up does not pass silently. The
+  // rooms that did match are already committed above.
+  return unknownRooms.length > 0
+    ? { httpStatus: 404, result: "FAILURE", message: summary }
+    : { httpStatus: 200, result: "SUCCESS", message: summary };
 }
 
 // Call status API contract (device integration)
@@ -2149,9 +2257,11 @@ app.get("/api/callstatus", (req: Request, res: Response) => {
       beacon: "optional flag (no value) - marks the request as a device snapshot instead of a call; see beaconNote",
     },
     beaconNote:
-      "With ?...&beacon& the r-params are the rooms still ringing on the device, not new calls. " +
-      "Any call open on the dashboard for this hid that the beacon does not list as active - sent as 0, or left out entirely - is resolved. " +
-      "A beacon with no r-params at all means every room on the device is clear and resolves all of its open calls. A beacon never creates a call.",
+      "With ?...&beacon& the r-params are the device's snapshot of every room ringing on its panel, and the dashboard is brought into line with it. " +
+      "A room the beacon lists with no call open here is raised and appears on the dashboard; a room listed at a different status has its open call moved to that status; " +
+      "any call open for this hid that the beacon does not list - sent as 0, or left out entirely - is resolved. " +
+      "A room already open at the status the beacon reports is left untouched, so a beacon logs no repeat and re-announces nothing. " +
+      "A beacon with no r-params at all means every room on the device is clear and resolves all of its open calls.",
     beaconExample: `${base}/api/callstatus/insert?orgId=00001&hid=1234567890&beacon&r01=1&r03=3`,
     // The device does not send a floor. The server reads it off the matched
     // room and returns it on the call, so a room can be moved between floors in
@@ -2163,7 +2273,7 @@ app.get("/api/callstatus", (req: Request, res: Response) => {
 
 // Insert record into CallStatus via GET (for device integration)
 // URL: /api/callstatus/insert?orgId=00001&hid=1234567890&r01=1&r02=2&r22=3
-// Add &beacon& to send a device snapshot instead of a call - see processBeaconSnapshot above.
+// Add &beacon& to send a device snapshot instead of a single call - see processBeaconSnapshot above.
 // r{roomNo}=0 reset | 1 normal | 2 emergency | 3 code blue | 4 toilet | 5 miscellaneous (reports only)
 // The room is identified by orgId + hid + device number. The device sends no
 // floor: it is read off the matched room below and travels back with the call,
