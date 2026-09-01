@@ -27,7 +27,14 @@ function formatRoomParamKey(roomNo: string): string {
 }
 
 // orgId + hid + device number identify the room; a call carries no floor.
-function buildInsertUrl(orgId: string, hid: string, rooms: RoomRow[]): string {
+//
+// In beacon mode the same URL carries a valueless `beacon` flag and the rooms
+// are read as the device's snapshot of what is still ringing rather than as new
+// calls - anything the dashboard still has open for this hid and the beacon
+// does not list is resolved. The flag is spliced in as a bare `&beacon` (not
+// via URLSearchParams, which would write `beacon=`) so the preview matches the
+// URL the real panels send.
+function buildInsertUrl(orgId: string, hid: string, rooms: RoomRow[], beacon: boolean): string {
   const params = new URLSearchParams({
     orgId,
     hid,
@@ -36,19 +43,24 @@ function buildInsertUrl(orgId: string, hid: string, rooms: RoomRow[]): string {
     if (!roomNo.trim()) continue;
     params.set(`r${formatRoomParamKey(roomNo)}`, String(status));
   }
-  return `${API_BASE}/api/callstatus/insert?${params.toString()}`;
+  const query = params.toString();
+  if (!beacon) return `${API_BASE}/api/callstatus/insert?${query}`;
+  const [head, ...rest] = query.split(`&r`);
+  const roomQuery = rest.length ? `r${rest.join("&r")}` : "";
+  return `${API_BASE}/api/callstatus/insert?${head}&beacon&${roomQuery}`;
 }
 
 export default function DeviceEmulatorPage() {
   const [orgId, setOrgId] = useState("00001");
   const [hid, setHid] = useState("1234567890");
   const [rooms, setRooms] = useState<RoomRow[]>(DEFAULT_ROOMS);
+  const [beacon, setBeacon] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const previewUrl = useMemo(
-    () => buildInsertUrl(orgId, hid, rooms),
-    [orgId, hid, rooms]
+    () => buildInsertUrl(orgId, hid, rooms, beacon),
+    [orgId, hid, rooms, beacon]
   );
 
   const updateRoom = (id: string, field: "roomNo" | "status", value: string | number) => {
@@ -64,8 +76,10 @@ export default function DeviceEmulatorPage() {
     ]);
   };
 
+  // A beacon with no rooms is the device's all-clear, so beacon mode may empty
+  // the list; a plain call URL still needs at least one room to be valid.
   const removeRoom = (id: string) => {
-    setRooms((prev) => (prev.length > 1 ? prev.filter((row) => row.id !== id) : prev));
+    setRooms((prev) => (beacon || prev.length > 1 ? prev.filter((row) => row.id !== id) : prev));
   };
 
   const handleSend = async () => {
@@ -118,9 +132,28 @@ export default function DeviceEmulatorPage() {
             />
           </div>
 
+          <label className="flex items-start gap-2 rounded border border-pink-200 bg-pink-50 p-3 dark:border-pink-900 dark:bg-pink-950/40">
+            <input
+              type="checkbox"
+              className="mt-1"
+              checked={beacon}
+              onChange={(e) => setBeacon(e.target.checked)}
+            />
+            <span className="text-sm text-gray-700 dark:text-gray-200">
+              <span className="font-semibold">Beacon (snapshot)</span>
+              <span className="block text-xs text-gray-600 dark:text-gray-400">
+                Rooms below are what is still ringing on the device, not new calls. Anything the
+                dashboard still shows for this HID and the beacon leaves out (or sends as 0) is
+                resolved. Remove every room to send an all-clear beacon.
+              </span>
+            </span>
+          </label>
+
           <div>
             <div className="flex items-center justify-between mb-2">
-              <label className="block text-gray-700 dark:text-gray-200">Rooms</label>
+              <label className="block text-gray-700 dark:text-gray-200">
+                {beacon ? "Rooms still active on device" : "Rooms"}
+              </label>
               <button
                 type="button"
                 className="text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400"

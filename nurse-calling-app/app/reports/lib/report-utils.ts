@@ -92,17 +92,31 @@ export function isCallActive(call: CallRecord): boolean {
   return Number(call?.status) !== 0;
 }
 
-export function getCallStateLabel(call: CallRecord): "Active" | "Resolved" {
-  return isCallActive(call) ? "Active" : "Resolved";
+export function getCallStateLabel(call: CallRecord): "Active" | "Resolved" | "Beacon" {
+  if (isCallActive(call)) return "Active";
+  return isBeaconResolved(call) ? "Beacon" : "Resolved";
 }
 
 export function isDashboardResolved(call: CallRecord): boolean {
   return call?.resolvedManually === true || call?.resolvedManually === 1;
 }
 
+/**
+ * Closed by a device beacon: the device had already cleared the call while the
+ * dashboard still showed it active, and the next beacon swept it away. Worth
+ * telling apart from an ordinary device reset - it marks a reset that never
+ * reached us the first time round.
+ */
+export function isBeaconResolved(call: CallRecord): boolean {
+  return call?.resolvedBy === "beacon";
+}
+
 export function getResolvedStatusClassName(call: CallRecord): string {
   if (isCallActive(call)) {
     return "inline-block rounded-full px-3 py-1 text-xs font-semibold bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200";
+  }
+  if (isBeaconResolved(call)) {
+    return "inline-block rounded-full px-3 py-1 text-xs font-semibold bg-pink-100 text-pink-800 dark:bg-pink-950 dark:text-pink-200";
   }
   if (isDashboardResolved(call)) {
     return "inline-block rounded-full px-3 py-1 text-xs font-semibold bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200";

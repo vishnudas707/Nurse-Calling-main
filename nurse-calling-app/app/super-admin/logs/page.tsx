@@ -36,9 +36,13 @@ const ACTION_OPTIONS = [
   { value: "call.created", label: "Call created" },
   { value: "call.repeated", label: "Call repeated" },
   { value: "call.resolved", label: "Call resolved" },
+  { value: "call.resolved.beacon", label: "Call resolved by beacon" },
 ];
 
 const actionBadgeClass = (action: string) => {
+  // A beacon resolve is the device telling us a call we still showed as active
+  // was already cleared - same light pink it wears in the call reports.
+  if (action === "call.resolved.beacon") return "bg-pink-100 text-pink-800";
   if (action.startsWith("call.")) return "bg-red-100 text-red-800";
   if (action.startsWith("organisation.")) return "bg-purple-100 text-purple-800";
   if (action.startsWith("user.")) return "bg-blue-100 text-blue-800";
