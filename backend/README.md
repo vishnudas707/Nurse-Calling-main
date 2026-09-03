@@ -150,6 +150,39 @@ next call reports the new one, with nothing to change on the hardware.
 
 **Insert response:** plain text `SUCCESS` when all rooms succeed, otherwise `FAILURE` (no JSON body).
 
+### Beacon report
+- `GET /api/beacon-logs` - Paged history of every beacon the devices have sent
+
+Adding `&beacon&` to the insert URL makes it a device snapshot (see
+`processBeaconSnapshot` in `server.ts`). Every one of those is recorded in the
+`BeaconLog` table with the time it arrived, the rooms it listed and what
+reconciling it changed — **including the ticks that changed nothing**, and the
+empty ones that reported a clear panel. That is the point of the table: those
+beacons leave no `CallStatus` row, so the call history cannot show them.
+
+| Query | Description |
+|-------|-------------|
+| `organisationId` | required |
+| `hid` | optional — one device. A beacon belongs to a device, so there is no `floor` filter |
+| `startDate` / `endDate` | optional ISO datetimes, matched against `receivedAt` |
+| `search` | optional — matches the HID, the reported rooms, or the result line |
+| `activity` | optional — `ringing` (something was ringing), `clear` (empty panel), `changed` (raised, resolved or restated something) |
+| `page` / `pageSize` | paging; defaults `1` / `10` |
+
+Each row carries `receivedAt`, `hid`, `roomCount`, `ringingCount`,
+`raised`/`resolved`/`restated`/`unchanged`, the parsed `rooms` array
+(`deviceNo`, `roomName`, `status`, `statusLabel`) and the `summary` line.
+
+The server creates `BeaconLog` itself the first time a beacon arrives. Where the
+service user has no DDL rights, run `migrations/add-beacon-log.sql` by hand —
+until the table exists, beacons still reconcile calls normally and this endpoint
+answers `503` with that instruction.
+
+**Growth:** one row per beacon per device, so a device beaconing every 10s adds
+~8,600 rows a day on its own. Nothing prunes it automatically — if the history
+is only wanted for a few months, schedule a delete, e.g.
+`DELETE FROM [BeaconLog] WHERE receivedAt < DATEADD(month, -3, GETDATE());`.
+
 ### Health Check
 - `GET /api/health` - Server health status
 

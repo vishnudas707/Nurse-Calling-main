@@ -2029,6 +2029,130 @@ async function processCallStatusForRoom(
 }
 
 // ---------------------------------------------------------------------------
+// Beacon log
+//
+// Every beacon that reaches the server is written here, whether or not it moved
+// a single call: the beacon report is a record of what the devices sent and
+// when, so a tick that changed nothing - or one that reported an empty panel -
+// is as much a row as one that raised a call. This is deliberately not derived
+// from CallStatus: a call row only exists for rooms that were ringing, and it
+// carries the call's own times, not the moment the beacon arrived.
+//
+// As with the other additive tables, the service user may have no DDL rights in
+// production: the table is created once if possible, and everything degrades to
+// "no beacon history" when it is not there. migrations/add-beacon-log.sql has
+// the statements to run by hand in that case.
+const BEACON_LOG_TABLE = "BeaconLog";
+let beaconLogTableCache: boolean | null = null;
+
+/** One room as the device reported it in the beacon URL. */
+type BeaconLogRoom = { deviceNo: string; roomName: string | null; status: number };
+
+/** What a beacon reported, plus what reconciling it changed. */
+type BeaconSnapshotOutcome = {
+  httpStatus: number;
+  result: string;
+  message: string;
+  rooms: BeaconLogRoom[];
+  raised: number;
+  resolved: number;
+  restated: number;
+  unchanged: number;
+};
+
+type BeaconLogEntry = {
+  organisationId: string;
+  hid: string;
+  receivedAt: Date;
+  rooms: BeaconLogRoom[];
+  raised: number;
+  resolved: number;
+  restated: number;
+  unchanged: number;
+  summary: string;
+  requestUrl?: string | null;
+};
+
+async function ensureBeaconLogTable(pool: Awaited<ReturnType<typeof getPool>>): Promise<boolean> {
+  if (beaconLogTableCache !== null) return beaconLogTableCache;
+  try {
+    const existing = await pool
+      .request()
+      .query(`SELECT OBJECT_ID(N'[dbo].[${BEACON_LOG_TABLE}]', N'U') AS objId`);
+    if (existing?.recordset?.[0]?.objId) {
+      beaconLogTableCache = true;
+      return true;
+    }
+  } catch (err) {
+    console.error("[BeaconLog] Table existence check failed:", err);
+    beaconLogTableCache = false;
+    return false;
+  }
+
+  try {
+    await pool.request().query(
+      `CREATE TABLE [dbo].[${BEACON_LOG_TABLE}] (
+         id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+         organisationId NVARCHAR(50) NOT NULL,
+         hid NVARCHAR(20) NOT NULL,
+         receivedAt DATETIME NOT NULL CONSTRAINT DF_BeaconLog_receivedAt DEFAULT GETDATE(),
+         roomCount INT NOT NULL CONSTRAINT DF_BeaconLog_roomCount DEFAULT 0,
+         ringingCount INT NOT NULL CONSTRAINT DF_BeaconLog_ringingCount DEFAULT 0,
+         raised INT NOT NULL CONSTRAINT DF_BeaconLog_raised DEFAULT 0,
+         resolved INT NOT NULL CONSTRAINT DF_BeaconLog_resolved DEFAULT 0,
+         restated INT NOT NULL CONSTRAINT DF_BeaconLog_restated DEFAULT 0,
+         unchanged INT NOT NULL CONSTRAINT DF_BeaconLog_unchanged DEFAULT 0,
+         rooms NVARCHAR(MAX) NULL,
+         summary NVARCHAR(1000) NULL,
+         requestUrl NVARCHAR(500) NULL
+       );
+       CREATE INDEX IX_BeaconLog_organisationId_receivedAt
+         ON [dbo].[${BEACON_LOG_TABLE}] (organisationId, receivedAt DESC);
+       CREATE INDEX IX_BeaconLog_hid ON [dbo].[${BEACON_LOG_TABLE}] (hid);`
+    );
+    console.log("[BeaconLog] Table created");
+    beaconLogTableCache = true;
+    return true;
+  } catch (err) {
+    console.error("[BeaconLog] Table creation failed, beacon history will not be recorded:", err);
+    beaconLogTableCache = false;
+    return false;
+  }
+}
+
+/**
+ * Records one beacon. A failure here is logged and swallowed: the device is
+ * waiting on SUCCESS/FAILURE for the reconciliation it asked for, and losing a
+ * history row must never turn that into an error.
+ */
+async function writeBeaconLog(pool: Awaited<ReturnType<typeof getPool>>, entry: BeaconLogEntry) {
+  try {
+    if (!(await ensureBeaconLogTable(pool))) return;
+    const ringingCount = entry.rooms.filter((room) => room.status !== 0).length;
+    const request = pool.request();
+    request.input("organisationId", sql.NVarChar(50), entry.organisationId);
+    request.input("hid", sql.NVarChar(20), entry.hid);
+    request.input("receivedAt", sql.DateTime, entry.receivedAt);
+    request.input("roomCount", sql.Int, entry.rooms.length);
+    request.input("ringingCount", sql.Int, ringingCount);
+    request.input("raised", sql.Int, entry.raised);
+    request.input("resolved", sql.Int, entry.resolved);
+    request.input("restated", sql.Int, entry.restated);
+    request.input("unchanged", sql.Int, entry.unchanged);
+    request.input("rooms", sql.NVarChar(sql.MAX), JSON.stringify(entry.rooms));
+    request.input("summary", sql.NVarChar(1000), entry.summary.slice(0, 1000));
+    request.input("requestUrl", sql.NVarChar(500), (entry.requestUrl || "").slice(0, 500) || null);
+    await request.query(
+      `INSERT INTO [${BEACON_LOG_TABLE}]
+       (organisationId, hid, receivedAt, roomCount, ringingCount, raised, resolved, restated, unchanged, rooms, summary, requestUrl)
+       VALUES (@organisationId, @hid, @receivedAt, @roomCount, @ringingCount, @raised, @resolved, @restated, @unchanged, @rooms, @summary, @requestUrl)`
+    );
+  } catch (err) {
+    console.error("[BeaconLog] write failed:", err);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Beacon reconciliation
 //
 // A beacon URL is the device's periodic snapshot of every room ringing on its
@@ -2074,7 +2198,7 @@ async function processBeaconSnapshot(
   orgId: string,
   hid: string,
   roomUpdates: { roomNo: string; status: number }[]
-): Promise<{ httpStatus: number; result: string; message: string }> {
+): Promise<BeaconSnapshotOutcome> {
   // Device number -> the status the panel reports it ringing at. A 0 is the
   // device saying that room is clear, which is the same as leaving it out.
   const ringing = new Map<string, number>();
@@ -2082,6 +2206,11 @@ async function processBeaconSnapshot(
     if (status === 0) continue;
     ringing.set(normalizeDeviceNo(roomNo), status);
   }
+
+  // Names for the beacon log, filled in from the room rows this function
+  // already reads. A device number with no room configured stays nameless
+  // rather than costing an extra lookup on every beacon tick.
+  const roomNames = new Map<string, string>();
 
   // Same room-matching rule as a call insert - rooms tagged with this device
   // plus rooms with no HID filled in - so a beacon touches exactly the calls
@@ -2113,6 +2242,7 @@ async function processBeaconSnapshot(
   for (const row of openCalls.recordset) {
     const deviceNo = normalizeDeviceNo(row.deviceNo);
     const beaconStatus = ringing.get(deviceNo);
+    if (row.roomName) roomNames.set(deviceNo, row.roomName);
 
     if (beaconStatus === undefined) {
       // Cleared on the device while the dashboard still showed it ringing.
@@ -2181,6 +2311,7 @@ async function processBeaconSnapshot(
     for (const row of roomRows.recordset) {
       const key = normalizeDeviceNo(row.deviceNo);
       if (!roomsByDeviceNo.has(key)) roomsByDeviceNo.set(key, row);
+      if (row.roomName && !roomNames.has(key)) roomNames.set(key, row.roomName);
     }
 
     for (const [deviceNo, status] of missing) {
@@ -2230,18 +2361,149 @@ async function processBeaconSnapshot(
     }
   }
 
+  const unchanged = openDeviceNos.size - restated;
   const summary =
     `Beacon ${hid}: raised ${raised}, resolved ${resolved}, restated ${restated}, ` +
-    `unchanged ${openDeviceNos.size - restated}` +
+    `unchanged ${unchanged}` +
     (unknownRooms.length ? `, no room for device number(s) ${unknownRooms.join(", ")}` : "");
+
+  // Exactly what the device sent, in the order it sent it, with the rooms it
+  // cleared (status 0) kept: the beacon report shows the snapshot, not just the
+  // part of it that changed something here.
+  const rooms: BeaconLogRoom[] = roomUpdates.map(({ roomNo, status }) => {
+    const deviceNo = normalizeDeviceNo(roomNo);
+    return { deviceNo, roomName: roomNames.get(deviceNo) ?? null, status };
+  });
+  const stats = { raised, resolved, restated, unchanged, rooms };
 
   // An unconfigured room number is reported the way a plain insert reports it,
   // so a beacon listing a room nobody has set up does not pass silently. The
   // rooms that did match are already committed above.
   return unknownRooms.length > 0
-    ? { httpStatus: 404, result: "FAILURE", message: summary }
-    : { httpStatus: 200, result: "SUCCESS", message: summary };
+    ? { httpStatus: 404, result: "FAILURE", message: summary, ...stats }
+    : { httpStatus: 200, result: "SUCCESS", message: summary, ...stats };
 }
+
+// Beacon report
+//
+// Every beacon tick this organisation's devices have sent, newest first, with
+// the rooms each one reported. Unlike /api/calls/history this is not a view of
+// CallStatus: a beacon that reported an empty panel, or one whose rooms were
+// already in step with the dashboard, has no call row anywhere and still
+// belongs here.
+app.get("/api/beacon-logs", async (req: Request, res: Response) => {
+  try {
+    const { organisationId, hid, startDate, endDate, search, activity, page = 1, pageSize = 10 } = req.query;
+    if (!organisationId) {
+      return res.status(400).json({ success: false, error: "organisationId is required" });
+    }
+    const pool = await getPool();
+    if (!(await ensureBeaconLogTable(pool))) {
+      return res.status(503).json({
+        success: false,
+        error: `${BEACON_LOG_TABLE} table missing. Run backend/migrations/add-beacon-log.sql`,
+        data: [],
+        totalCount: 0,
+        totalPages: 0,
+      });
+    }
+
+    const where: string[] = ["organisationId = @organisationId"];
+    const params: { name: string; type: any; value: unknown }[] = [
+      { name: "organisationId", type: sql.NVarChar(50), value: String(organisationId) },
+    ];
+    if (hid) {
+      where.push("hid = @hid");
+      params.push({ name: "hid", type: sql.NVarChar(20), value: String(hid) });
+    }
+    if (startDate) {
+      where.push("receivedAt >= @startDate");
+      params.push({ name: "startDate", type: sql.DateTime, value: new Date(String(startDate)) });
+    }
+    if (endDate) {
+      where.push("receivedAt <= @endDate");
+      params.push({ name: "endDate", type: sql.DateTime, value: new Date(String(endDate)) });
+    }
+    if (search) {
+      // rooms holds the reported device numbers and room names as JSON, so one
+      // LIKE covers "which beacons mentioned room 3" as well as the HID.
+      where.push("(hid LIKE @search OR rooms LIKE @search OR summary LIKE @search)");
+      params.push({ name: "search", type: sql.NVarChar, value: `%${search}%` });
+    }
+    // A device with nothing ringing still beacons, and those ticks are most of
+    // the table - being able to hide them is what makes the report readable.
+    const activityStr = String(activity ?? "").toLowerCase();
+    if (activityStr === "ringing") {
+      where.push("ringingCount > 0");
+    } else if (activityStr === "clear") {
+      where.push("ringingCount = 0");
+    } else if (activityStr === "changed") {
+      where.push("(raised > 0 OR resolved > 0 OR restated > 0)");
+    }
+
+    const whereClause = ` WHERE ${where.join(" AND ")}`;
+    const countReq = pool.request();
+    const dataReq = pool.request();
+    params.forEach((p) => {
+      countReq.input(p.name, p.type, p.value);
+      dataReq.input(p.name, p.type, p.value);
+    });
+
+    const pageNum = Math.max(1, Number(page) || 1);
+    const size = Math.max(1, Number(pageSize) || 10);
+    const offset = (pageNum - 1) * size;
+    const [countResult, result] = await Promise.all([
+      countReq.query(`SELECT COUNT(*) AS total FROM [${BEACON_LOG_TABLE}]${whereClause}`),
+      dataReq.query(
+        `SELECT id, organisationId, hid, receivedAt, roomCount, ringingCount,
+                raised, resolved, restated, unchanged, rooms, summary, requestUrl
+           FROM [${BEACON_LOG_TABLE}]${whereClause}
+          ORDER BY receivedAt DESC, id DESC
+          OFFSET ${offset} ROWS FETCH NEXT ${size} ROWS ONLY`
+      ),
+    ]);
+    const totalCount = countResult.recordset[0]?.total || 0;
+
+    const data = result.recordset.map((row: any) => {
+      let rooms: BeaconLogRoom[] = [];
+      try {
+        rooms = row.rooms ? JSON.parse(row.rooms) : [];
+      } catch {
+        rooms = [];
+      }
+      return {
+        id: row.id,
+        organisationId: row.organisationId,
+        hid: row.hid,
+        receivedAt: row.receivedAt,
+        roomCount: row.roomCount,
+        ringingCount: row.ringingCount,
+        raised: row.raised,
+        resolved: row.resolved,
+        restated: row.restated,
+        unchanged: row.unchanged,
+        summary: row.summary || "",
+        requestUrl: row.requestUrl || null,
+        rooms: rooms.map((room) => ({
+          ...room,
+          statusLabel: getCallStatusMeta(Number(room.status)).label,
+        })),
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      data,
+      totalCount,
+      totalPages: Math.ceil(totalCount / size),
+      page: pageNum,
+      pageSize: size,
+    });
+  } catch (err) {
+    console.error("[BEACON LOGS GET] Error:", err);
+    return res.status(500).json({ success: false, error: "Failed to fetch beacon logs" });
+  }
+});
 
 // Call status API contract (device integration)
 app.get("/api/callstatus", (req: Request, res: Response) => {
@@ -2315,9 +2577,47 @@ app.get("/api/callstatus/insert", async (req: Request, res: Response) => {
     const pool = await getPool();
 
     if (isBeacon) {
-      const outcome = await processBeaconSnapshot(pool, String(orgId), hidStr, roomUpdates);
-      console.log('[CALLSTATUS BEACON]', outcome.message);
-      return sendCallStatusResult(outcome.httpStatus, outcome.result === "SUCCESS");
+      // Stamped before the work, so the report shows when the device reported
+      // in rather than how long reconciling it took.
+      const receivedAt = new Date();
+      const requestUrl = req.originalUrl;
+      try {
+        const outcome = await processBeaconSnapshot(pool, String(orgId), hidStr, roomUpdates);
+        console.log('[CALLSTATUS BEACON]', outcome.message);
+        await writeBeaconLog(pool, {
+          organisationId: String(orgId),
+          hid: hidStr,
+          receivedAt,
+          rooms: outcome.rooms,
+          raised: outcome.raised,
+          resolved: outcome.resolved,
+          restated: outcome.restated,
+          unchanged: outcome.unchanged,
+          summary: outcome.message,
+          requestUrl,
+        });
+        return sendCallStatusResult(outcome.httpStatus, outcome.result === "SUCCESS");
+      } catch (err) {
+        // The beacon did arrive: record it with the failure rather than let the
+        // report lose a tick the device believes it sent.
+        await writeBeaconLog(pool, {
+          organisationId: String(orgId),
+          hid: hidStr,
+          receivedAt,
+          rooms: roomUpdates.map(({ roomNo, status }) => ({
+            deviceNo: normalizeDeviceNo(roomNo),
+            roomName: null,
+            status,
+          })),
+          raised: 0,
+          resolved: 0,
+          restated: 0,
+          unchanged: 0,
+          summary: `Beacon ${hidStr}: reconciliation failed - ${err instanceof Error ? err.message : String(err)}`,
+          requestUrl,
+        });
+        throw err;
+      }
     }
 
     const repeatEnabled = await hasCallRepeatTable(pool);

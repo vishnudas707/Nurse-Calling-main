@@ -233,7 +233,7 @@ export default function ReportsPage() {
 
           <Card className="mb-6 rounded-2xl dark:bg-gray-800 sm:mb-8">
             <h2 className="mb-4 text-lg font-semibold text-gray-900 dark:text-gray-100">Summary Reports</h2>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <Link
                 href="/reports/calls-per-day"
                 className="touch-btn bg-teal-700 text-center text-white hover:bg-teal-800"
@@ -251,6 +251,14 @@ export default function ReportsPage() {
                 className="touch-btn bg-teal-700 text-center text-white hover:bg-teal-800"
               >
                 Attending Lag
+              </Link>
+              {/* Not a view of the call history above: it lists every beacon the
+                  devices sent, including the ones that raised no call at all. */}
+              <Link
+                href="/reports/beacon-data"
+                className="touch-btn bg-teal-700 text-center text-white hover:bg-teal-800"
+              >
+                Beacon Data
               </Link>
             </div>
           </Card>

@@ -22,6 +22,81 @@ export function callsHistoryUrl(query: string) {
   return `${API_BASE}/api/calls/history${prefix}&${query}`;
 }
 
+export function beaconLogsUrl(query: string) {
+  const prefix = organisationQueryPrefix();
+  if (!prefix) throw new Error("Organisation ID is required");
+  return `${API_BASE}/api/beacon-logs${prefix}&${query}`;
+}
+
+export type BeaconFilterParams = {
+  startDate?: string;
+  endDate?: string;
+  search?: string;
+  /** "", "ringing", "clear" or "changed" - see the beacon-logs endpoint. */
+  activity?: string;
+  /**
+   * A beacon belongs to a device, not to a floor, so this report narrows by HID
+   * only. A floor-based scope leaves it showing every device.
+   */
+  hid?: string;
+};
+
+export function buildBeaconLogsParams(filters: BeaconFilterParams, page = 1, pageSize = 10) {
+  const params: string[] = [];
+  const normalizedStartDate = normalizeDateFilter(filters.startDate, "start");
+  const normalizedEndDate = normalizeDateFilter(filters.endDate, "end");
+  if (normalizedStartDate) params.push(`startDate=${encodeURIComponent(normalizedStartDate)}`);
+  if (normalizedEndDate) params.push(`endDate=${encodeURIComponent(normalizedEndDate)}`);
+  if (filters.search) params.push(`search=${encodeURIComponent(filters.search)}`);
+  if (filters.activity) params.push(`activity=${encodeURIComponent(filters.activity)}`);
+  if (filters.hid) params.push(`hid=${encodeURIComponent(filters.hid)}`);
+  params.push(`page=${page}`);
+  params.push(`pageSize=${pageSize}`);
+  return params.join("&");
+}
+
+export type BeaconLogRoom = {
+  deviceNo: string;
+  roomName: string | null;
+  status: number;
+  statusLabel?: string;
+};
+
+export type BeaconLogRecord = {
+  id: number;
+  hid: string;
+  receivedAt: string;
+  roomCount: number;
+  ringingCount: number;
+  raised: number;
+  resolved: number;
+  restated: number;
+  unchanged: number;
+  summary: string;
+  requestUrl: string | null;
+  rooms: BeaconLogRoom[];
+};
+
+/** "R01 Emergency, R03 Code Blue" - the beacon's rooms as one readable cell. */
+export function describeBeaconRooms(rooms: BeaconLogRoom[]): string {
+  if (!rooms?.length) return "";
+  return rooms
+    .map((room) => {
+      const label = room.statusLabel || String(room.status);
+      const name = room.roomName ? ` (${room.roomName})` : "";
+      return `R${String(room.deviceNo).padStart(2, "0")}${name} ${label}`;
+    })
+    .join(", ");
+}
+
+/** Local date and time, spelled out - a beacon row is worthless without it. */
+export function formatBeaconTimestamp(value: string | Date | null | undefined): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString();
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type CallRecord = any;
 
