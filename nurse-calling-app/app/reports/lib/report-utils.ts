@@ -1,6 +1,7 @@
 import { getOrganisationId } from "../../lib/auth";
 import { scopeQuery } from "../../lib/scope";
 import type { Scope } from "../../lib/scope";
+import { formatDateTime } from "../../lib/date-format";
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://20.163.9.187:5001";
 
@@ -91,10 +92,7 @@ export function describeBeaconRooms(rooms: BeaconLogRoom[]): string {
 
 /** Local date and time, spelled out - a beacon row is worthless without it. */
 export function formatBeaconTimestamp(value: string | Date | null | undefined): string {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleString();
+  return formatDateTime(value);
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

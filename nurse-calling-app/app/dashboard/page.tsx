@@ -13,6 +13,7 @@ import type { Scope } from "../lib/scope";
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { io, Socket } from "socket.io-client";
+import { formatDateTime } from "../lib/date-format";
 
   function DashboardPage() {
     const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://20.163.9.187:5001";
@@ -652,11 +653,11 @@ import { io, Socket } from "socket.io-client";
                           </span>
                           {item.dateTimeReset ? (
                             <p className="text-xs text-amber-800 dark:text-amber-300">
-                              Reset: {new Date(item.dateTimeReset).toLocaleString()}
+                              Reset: {formatDateTime(item.dateTimeReset)}
                             </p>
                           ) : null}
                           <p className="text-xs text-gray-600 dark:text-gray-400">
-                            {item.timestamp ? new Date(item.timestamp).toLocaleString() : ''}
+                            {formatDateTime(item.timestamp)}
                           </p>
                         </div>
                       </div>

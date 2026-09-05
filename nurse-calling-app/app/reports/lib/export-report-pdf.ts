@@ -1,5 +1,6 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import { formatDateTime, formatDayKey } from "../../lib/date-format";
 
 export function exportCallsPerDayPdf(rows: { day: string; count: number }[]) {
   const doc = new jsPDF();
@@ -7,7 +8,7 @@ export function exportCallsPerDayPdf(rows: { day: string; count: number }[]) {
   autoTable(doc, {
     startY: 22,
     head: [["Date", "Count"]],
-    body: rows.map((r) => [r.day, String(r.count)]),
+    body: rows.map((r) => [formatDayKey(r.day), String(r.count)]),
   });
   doc.save("calls_per_day.pdf");
 }
@@ -33,8 +34,8 @@ export function exportAttendingLagPdf(rows: any[], lagThresholdMinutes: number) 
     body: rows.map((c) => [
       c.id,
       c.roomName || "",
-      c.timestamp ? new Date(c.timestamp).toLocaleString() : "",
-      c.dateTimeReset ? new Date(c.dateTimeReset).toLocaleString() : "",
+      formatDateTime(c.timestamp),
+      formatDateTime(c.dateTimeReset),
       String(c.lagMinutes ?? ""),
     ]),
   });

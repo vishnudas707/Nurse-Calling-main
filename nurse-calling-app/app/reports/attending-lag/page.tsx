@@ -7,6 +7,7 @@ import ReportFilters from "../components/ReportFilters";
 import { useReportCalls } from "../hooks/useReportCalls";
 import { exportAttendingLagPdf } from "../lib/export-report-pdf";
 import { computeLaggedAttendingCalls } from "../lib/report-utils";
+import { formatDateTime } from "../../lib/date-format";
 
 export default function AttendingLagPage() {
   const [search, setSearch] = useState("");
@@ -101,10 +102,10 @@ export default function AttendingLagPage() {
                           <td className="px-4 py-2 whitespace-nowrap">{c.id}</td>
                           <td className="px-4 py-2 whitespace-nowrap">{c.roomName}</td>
                           <td className="px-4 py-2 whitespace-nowrap">
-                            {c.timestamp ? new Date(c.timestamp).toLocaleString() : ""}
+                            {formatDateTime(c.timestamp)}
                           </td>
                           <td className="px-4 py-2 whitespace-nowrap">
-                            {c.dateTimeReset ? new Date(c.dateTimeReset).toLocaleString() : ""}
+                            {formatDateTime(c.dateTimeReset)}
                           </td>
                           <td className="px-4 py-2 whitespace-nowrap font-semibold text-red-700 dark:text-red-300">
                             {c.lagMinutes}

@@ -7,6 +7,7 @@ import ReportFilters from "../components/ReportFilters";
 import { useReportCalls } from "../hooks/useReportCalls";
 import { exportCallsPerDayPdf } from "../lib/export-report-pdf";
 import { computeCallsPerDay } from "../lib/report-utils";
+import { formatDayKey } from "../../lib/date-format";
 
 export default function CallsPerDayPage() {
   const [search, setSearch] = useState("");
@@ -89,7 +90,7 @@ export default function CallsPerDayPage() {
                     ) : (
                       callsPerDay.map((r) => (
                         <tr key={r.day}>
-                          <td className="px-4 py-2 whitespace-nowrap">{r.day}</td>
+                          <td className="px-4 py-2 whitespace-nowrap">{formatDayKey(r.day)}</td>
                           <td className="px-4 py-2 whitespace-nowrap font-semibold">{r.count}</td>
                         </tr>
                       ))

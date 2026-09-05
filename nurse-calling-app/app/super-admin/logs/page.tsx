@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { adminGet } from "../../lib/admin-api";
 import AlertMessages from "../components/AlertMessages";
 import SuperAdminShell from "../components/SuperAdminShell";
+import { formatDateTime } from "../../lib/date-format";
 
 type ActivityLog = {
   id: string;
@@ -180,7 +181,7 @@ export default function SuperAdminLogsPage() {
                     {logs.map((log) => (
                       <tr key={log.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
                         <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">
-                          {log.createdAt ? new Date(log.createdAt).toLocaleString() : "\u2014"}
+                          {formatDateTime(log.createdAt) || "\u2014"}
                         </td>
                         <td className="px-4 py-2 whitespace-nowrap text-sm">
                           <div className="font-medium text-gray-900 dark:text-gray-100">{log.organisationName || "\u2014"}</div>

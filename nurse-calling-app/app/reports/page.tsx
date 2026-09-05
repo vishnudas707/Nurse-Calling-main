@@ -17,6 +17,7 @@ import {
   getResolvedStatusClassName,
   sortCallsForReportTable,
 } from "./lib/report-utils";
+import { formatDateTime } from "../lib/date-format";
 
 const PAGE_SIZE_ALL = 100000;
 const PAGE_SIZE_OPTIONS = [
@@ -152,11 +153,11 @@ export default function ReportsPage() {
       "Call Type": getCallTypeDisplay(call),
       "Status": getCallStateLabel(call),
       "Muted": call.muted ? "Muted" : "Unmuted",
-      "Created": call.timestamp ? new Date(call.timestamp).toLocaleString() : '',
-      "Muted At": call.mutedDateTime ? new Date(call.mutedDateTime).toLocaleString() : '',
-      "Reset At": call.dateTimeReset ? new Date(call.dateTimeReset).toLocaleString() : '',
+      "Created": formatDateTime(call.timestamp),
+      "Muted At": formatDateTime(call.mutedDateTime),
+      "Reset At": formatDateTime(call.dateTimeReset),
       "Repeat Count": call.repeatCount || 0,
-      "Last Repeat At": call.lastRepeatAt ? new Date(call.lastRepeatAt).toLocaleString() : '',
+      "Last Repeat At": formatDateTime(call.lastRepeatAt),
       "Repeat Duration (min)": call.repeatDurationMinutes ?? '',
     })));
     const wb = XLSX.utils.book_new();
@@ -181,11 +182,11 @@ export default function ReportsPage() {
         getCallTypeDisplay(call),
         getCallStateLabel(call),
         call.muted ? "Muted" : "Unmuted",
-        call.timestamp ? new Date(call.timestamp).toLocaleString() : '',
-        call.mutedDateTime ? new Date(call.mutedDateTime).toLocaleString() : '',
-        call.dateTimeReset ? new Date(call.dateTimeReset).toLocaleString() : '',
+        formatDateTime(call.timestamp),
+        formatDateTime(call.mutedDateTime),
+        formatDateTime(call.dateTimeReset),
         call.repeatCount || 0,
-        call.lastRepeatAt ? new Date(call.lastRepeatAt).toLocaleString() : '',
+        formatDateTime(call.lastRepeatAt),
         call.repeatDurationMinutes ?? '',
       ]),
     });
@@ -355,11 +356,11 @@ export default function ReportsPage() {
                           </span>
                         </td>
                         <td className="px-4 py-2 whitespace-nowrap">{call.muted ? 'Muted' : 'Unmuted'}</td>
-                        <td className="px-4 py-2 whitespace-nowrap">{call.timestamp ? new Date(call.timestamp).toLocaleString() : ''}</td>
-                        <td className="px-4 py-2 whitespace-nowrap">{call.mutedDateTime ? new Date(call.mutedDateTime).toLocaleString() : ''}</td>
-                        <td className="px-4 py-2 whitespace-nowrap">{call.dateTimeReset ? new Date(call.dateTimeReset).toLocaleString() : ''}</td>
+                        <td className="px-4 py-2 whitespace-nowrap">{formatDateTime(call.timestamp)}</td>
+                        <td className="px-4 py-2 whitespace-nowrap">{formatDateTime(call.mutedDateTime)}</td>
+                        <td className="px-4 py-2 whitespace-nowrap">{formatDateTime(call.dateTimeReset)}</td>
                         <td className="px-4 py-2 whitespace-nowrap">{call.repeatCount || 0}</td>
-                        <td className="px-4 py-2 whitespace-nowrap">{call.lastRepeatAt ? new Date(call.lastRepeatAt).toLocaleString() : ''}</td>
+                        <td className="px-4 py-2 whitespace-nowrap">{formatDateTime(call.lastRepeatAt)}</td>
                         <td className="px-4 py-2 whitespace-nowrap">{call.repeatDurationMinutes ?? ''}</td>
                       </tr>
                     ))}
