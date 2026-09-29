@@ -362,7 +362,14 @@ import { formatDateTime } from "../lib/date-format";
             const exists = prev.find((c) => c.id === call.id);
             if (exists) {
               if (announce) speakText(`Announcement: Repeated call from ${call.roomName}. Please attend.`);
-              return prev;
+              // Stamp the repeat on the card so it shows how long since the
+              // room last pressed again.
+              const lastRepeatAt = call.lastRepeatAt || new Date().toISOString();
+              return prev.map((c) =>
+                c.id === call.id
+                  ? { ...c, lastRepeatAt, repeatCount: (c.repeatCount || 0) + 1 }
+                  : c
+              );
             }
             console.log('calling speakText for new call'+call.roomName);
             if (announce) speakText(`Announcement: New call from ${call.roomName}. Please attend.`);
@@ -510,6 +517,17 @@ import { formatDateTime } from "../lib/date-format";
                       : "";
                   })()}
                 </p>
+                {call.lastRepeatAt ? (
+                  <p className={`mt-1 text-xs font-semibold ${theme.meta}`}>
+                    {(() => {
+                      const d = new Date(call.lastRepeatAt);
+                      const pad = (n: number) => String(n).padStart(2, "0");
+                      const time = `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+                      const count = call.repeatCount > 1 ? ` (x${call.repeatCount})` : "";
+                      return `${time}${count}`;
+                    })()}
+                  </p>
+                ) : null}
                 {/* Mute status UI and toggle */}
                 {call.muted !== undefined && (
                   <div className="mt-3 flex w-full flex-col items-center">

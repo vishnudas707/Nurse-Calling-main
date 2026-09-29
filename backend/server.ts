@@ -1400,13 +1400,29 @@ app.get("/api/calls/active", async (req: Request, res: Response) => {
     // hid and floor ride along so the dashboard can split one organisation's
     // calls into per-device or per-floor views without a second round trip.
     const hasHidColumn = await ensureRoomHidColumn(pool);
+    // Last repeat time lets the dashboard show how long since the room last
+    // pressed again, not only since the call was first raised.
+    const repeatEnabled = await hasCallRepeatTable(pool);
     const request = pool.request();
     let query =
       `SELECT cs.[id], cs.[roomId], cs.[currentStatus], cs.[callType], cs.[dateTime], cs.[isMuted], cs.[dateTimeReset], r.[roomName], r.[organisationId], r.[floor]${
         hasHidColumn ? `, r.[${ROOM_HID_COLUMN}] AS [hid]` : `, NULL AS [hid]`
+      }${
+        repeatEnabled
+          ? `, ISNULL(cr.[repeatCount], 0) AS [repeatCount], cr.[lastRepeatAt] AS [lastRepeatAt]`
+          : `, 0 AS [repeatCount], NULL AS [lastRepeatAt]`
       }
        FROM [CallStatus] cs
        INNER JOIN [Room] r ON cs.[roomId] = r.[id]
+       ${
+         repeatEnabled
+           ? `LEFT JOIN (
+                SELECT callId, COUNT(*) AS repeatCount, MAX(repeatAt) AS lastRepeatAt
+                FROM [CallRepeat]
+                GROUP BY callId
+              ) cr ON cr.callId = cs.[id]`
+           : ``
+       }
        WHERE cs.[currentStatus] <> 0 AND ISNULL(cs.[callType], cs.[currentStatus]) <> ${MISCELLANEOUS_CALL_TYPE}`;
     request.input('organisationId', sql.NVarChar(50), String(organisationId));
     query += ` AND r.[organisationId] = @organisationId`;
@@ -1432,6 +1448,8 @@ app.get("/api/calls/active", async (req: Request, res: Response) => {
         minutesAgo: row.dateTime ? Math.floor((now - new Date(row.dateTime).getTime()) / 60000) : null,
         muted: row.isMuted === 1 || row.isMuted === true,
         dateTimeReset: row.dateTimeReset,
+        repeatCount: row.repeatCount || 0,
+        lastRepeatAt: row.lastRepeatAt ?? null,
         hid: row.hid ?? null,
         floor: row.floor ?? null,
         organisationId: row.organisationId || String(organisationId),
@@ -1914,6 +1932,7 @@ async function processCallStatusForRoom(
     .query(`SELECT TOP 1 id, currentStatus, callType, dateTime, isMuted, dateTimeReset FROM [CallStatus] WHERE roomId = @roomId AND currentStatus <> 0 ORDER BY dateTime DESC`);
   if (activeCallResult.recordset.length > 0 && isActivate) {
     const existing = activeCallResult.recordset[0];
+    const repeatAt = new Date();
 
     if (repeatEnabled) {
       try {
@@ -1921,7 +1940,7 @@ async function processCallStatusForRoom(
           .input('callId', sql.NVarChar(50), existing.id)
           .input('roomId', sql.NVarChar(50), roomId)
           .input('organisationId', sql.NVarChar(50), String(orgId))
-          .input('repeatAt', sql.DateTime, new Date())
+          .input('repeatAt', sql.DateTime, repeatAt)
           .query(`INSERT INTO [CallRepeat] (callId, roomId, organisationId, repeatAt) VALUES (@callId, @roomId, @organisationId, @repeatAt)`);
       } catch (repeatErr) {
         console.error('[CALLSTATUS INSERT] Failed to log repeat:', repeatErr);
@@ -1938,6 +1957,7 @@ async function processCallStatusForRoom(
       muted: existing.isMuted === 1 || existing.isMuted === true,
       dateTimeReset: existing.dateTimeReset,
       minutesAgo: 0,
+      lastRepeatAt: repeatAt,
       hid,
       floor: roomFloor,
       organisationId: orgId,
