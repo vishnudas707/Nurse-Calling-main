@@ -4,6 +4,7 @@ import TopNavBar from "../../components/navbar";
 import { Card, Spinner } from "flowbite-react";
 import { useState } from "react";
 import ReportFilters from "../components/ReportFilters";
+import CallsPerDayChart from "../components/CallsPerDayChart";
 import { useReportCalls } from "../hooks/useReportCalls";
 import { exportCallsPerDayPdf } from "../lib/export-report-pdf";
 import { computeCallsPerDay } from "../lib/report-utils";
@@ -72,6 +73,10 @@ export default function CallsPerDayPage() {
             ) : error ? (
               <div className="text-center text-red-600 dark:text-red-300 py-8">{error}</div>
             ) : (
+              <>
+              <div className="mb-6">
+                <CallsPerDayChart calls={allCalls}startDate={startDate} endDate={endDate} />
+              </div>
               <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                   <thead className="bg-gray-50 dark:bg-gray-700">
@@ -98,6 +103,7 @@ export default function CallsPerDayPage() {
                   </tbody>
                 </table>
               </div>
+              </>
             )}
           </Card>
         </div>
