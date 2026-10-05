@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { formatDayKey } from "../../lib/date-format";
 import { toDayKey } from "../lib/report-utils";
 
@@ -12,8 +12,8 @@ const PLOT_H = 260;
 const PAD = { top: 16, right: 16, bottom: 56, left: 48 };
 // 5px/hour keeps each day wide enough for its date and 12 AM / 11:59 PM labels.
 const MIN_HOUR_W = 5;
-const MAX_HOUR_W = 60;
-const ZOOM_STEP = 1.5;
+// Days shown at each zoom level; the last level always shows the full range.
+const ZOOM_SPANS = [1, 3, 7, 14, 30, 90];
 
 function parseDayKey(key: string): number | null {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(key);
@@ -93,10 +93,11 @@ export default function CallsPerDayChart({
   endDate?: string;
 }) {
   const [hover, setHover] = useState<number | null>(null);
-  const [zoom, setZoom] = useState<number | null>(null);
+  const [level, setLevel] = useState(0);
+  const [viewW, setViewW] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const { days, hours } = useMemo(() => {
+  const { days: allDays, hours: allHours } = useMemo(() => {
     const counts = new Map<string, number>();
     let firstKey = "";
     let lastKey = "";
@@ -122,30 +123,44 @@ export default function CallsPerDayChart({
     return { days: dayList, hours: hourList };
   }, [calls, startDate, endDate]);
 
-  if (days.length === 0) {
+  // Track the visible width so the shown days always fill it.
+  const hasData = allDays.length > 0;
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const update = () => setViewW(el.clientWidth);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [hasData]);
+
+  if (allDays.length === 0) {
     return <div className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">No data</div>;
   }
 
-  // Default zoom fits roughly 1000px; the buttons scale it from there.
-  const fitHourW = Math.min(24, Math.max(MIN_HOUR_W, 1000 / hours.length));
-  const hourW = zoom ?? fitHourW;
+  // Zoom levels are day spans: start on today alone, each zoom-out adds more
+  // dates, ending with the whole range.
+  const spans = [...ZOOM_SPANS.filter((s) => s < allDays.length), allDays.length];
+  const lvl = Math.min(level, spans.length - 1);
+  const span = spans[lvl];
+  // Focus on today, or the last day of the range if today is outside it.
+  const todayIdx = allDays.indexOf(toDayKey(new Date()));
+  const focusIdx = todayIdx >= 0 ? todayIdx : allDays.length - 1;
+  const startIdx = Math.max(0, Math.min(focusIdx - span + 1, allDays.length - span));
+  const days = allDays.slice(startIdx, startIdx + span);
+  const hours = allHours.slice(startIdx * 24, (startIdx + span) * 24);
+
+  const hourW = Math.max(MIN_HOUR_W, ((viewW || 1000) - PAD.left - PAD.right) / hours.length);
   const dayW = hourW * 24;
 
-  const applyZoom = (next: number | null) => {
-    const el = scrollRef.current;
-    const nextW = next ?? fitHourW;
-    // Keep the centre of the view on the same moment in time while zooming.
-    if (el) {
-      const centre = (el.scrollLeft + el.clientWidth / 2 - PAD.left) / hourW;
-      requestAnimationFrame(() => {
-        el.scrollLeft = Math.max(0, centre * nextW + PAD.left - el.clientWidth / 2);
-      });
-    }
+  const applyLevel = (next: number) => {
     setHover(null);
-    setZoom(next);
+    setLevel(next);
   };
-  const zoomIn = () => applyZoom(Math.min(MAX_HOUR_W, hourW * ZOOM_STEP));
-  const zoomOut = () => applyZoom(Math.max(MIN_HOUR_W, hourW / ZOOM_STEP));
+  const zoomIn = () => applyLevel(Math.max(0, lvl - 1));
+  const zoomOut = () => applyLevel(Math.min(spans.length - 1, lvl + 1));
+  const spanLabel = lvl === 0 && todayIdx >= 0 ? "Today" : span === allDays.length && lvl > 0 ? "All dates" : `${span} day${span === 1 ? "" : "s"}`;
 
   const { top: yMax, ticks: yTicks } = yScale(Math.max(...hours.map((h) => h.count)));
   const plotW = hours.length * hourW;
@@ -171,15 +186,15 @@ export default function CallsPerDayChart({
   return (
     <div>
       <div className="mb-2 flex items-center justify-end gap-2">
-        <span className="mr-1 text-xs text-gray-500 dark:text-gray-400">Zoom</span>
-        <button type="button" className={btn} onClick={zoomOut} disabled={hourW <= MIN_HOUR_W} aria-label="Zoom out">
+        <span className="mr-1 text-xs text-gray-500 dark:text-gray-400">{spanLabel}</span>
+        <button type="button" className={btn} onClick={zoomOut} disabled={lvl >= spans.length - 1} aria-label="Zoom out">
           −
         </button>
-        <button type="button" className={btn} onClick={zoomIn} disabled={hourW >= MAX_HOUR_W} aria-label="Zoom in">
+        <button type="button" className={btn} onClick={zoomIn} disabled={lvl === 0} aria-label="Zoom in">
           +
         </button>
-        <button type="button" className={btn} onClick={() => applyZoom(null)} disabled={zoom === null}>
-          Reset
+        <button type="button" className={btn} onClick={() => applyLevel(0)} disabled={lvl === 0}>
+          Today
         </button>
       </div>
 
