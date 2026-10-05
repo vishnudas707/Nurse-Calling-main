@@ -245,7 +245,7 @@ export default function CallsPerDayChart({
           <line x1={PAD.left} x2={PAD.left} y1={PAD.top} y2={baseY} className="stroke-gray-400 dark:stroke-gray-500" />
 
           {/* Smooth wave: 2px line through each hour's midpoint */}
-          <path d={curve} fill="none" strokeWidth={2} strokeLinejoin="round" className="stroke-blue-600 dark:stroke-blue-400" />
+          <path d={curve} fill="none" strokeWidth={2} strokeLinejoin="round" className="stroke-gray-700 dark:stroke-gray-300" />
 
           {/* Dots only once zoomed in far enough to tell hours apart */}
           {hourW >= 10 &&
@@ -256,7 +256,7 @@ export default function CallsPerDayChart({
                 cy={p.y}
                 r={3}
                 strokeWidth={1.5}
-                className="fill-white stroke-blue-600 dark:fill-gray-800 dark:stroke-blue-400"
+                className="fill-white stroke-gray-700 dark:fill-gray-800 dark:stroke-gray-300"
               />
             ))}
 
@@ -275,7 +275,7 @@ export default function CallsPerDayChart({
                 cy={points[hover].y}
                 r={5}
                 strokeWidth={2}
-                className="fill-white stroke-blue-600 dark:fill-gray-800 dark:stroke-blue-400"
+                className="fill-white stroke-gray-700 dark:fill-gray-800 dark:stroke-gray-300"
               />
             </>
           )}
