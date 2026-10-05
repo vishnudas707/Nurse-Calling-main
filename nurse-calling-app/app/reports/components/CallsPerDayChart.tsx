@@ -244,11 +244,7 @@ export default function CallsPerDayChart({
           ))}
           <line x1={PAD.left} x2={PAD.left} y1={PAD.top} y2={baseY} className="stroke-gray-400 dark:stroke-gray-500" />
 
-          {/* Smooth wave: area wash + 2px line through each hour's midpoint */}
-          <path
-            d={`${curve} L${points[points.length - 1].x},${baseY} L${points[0].x},${baseY} Z`}
-            className="fill-blue-600/10 dark:fill-blue-400/15"
-          />
+          {/* Smooth wave: 2px line through each hour's midpoint */}
           <path d={curve} fill="none" strokeWidth={2} strokeLinejoin="round" className="stroke-blue-600 dark:stroke-blue-400" />
 
           {/* Dots only once zoomed in far enough to tell hours apart */}
